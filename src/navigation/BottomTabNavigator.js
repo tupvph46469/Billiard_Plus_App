@@ -1,0 +1,39 @@
+import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
+import HomeScreen from "../screens/HomeScreen";
+import OrderScreen from "../screens/OrderScreen";
+import PaymentScreen from "../screens/PaymentScreen";
+import { Ionicons } from "@expo/vector-icons";
+
+const Tab = createBottomTabNavigator();
+
+export default function BottomTabNavigator() {
+  return (
+    <Tab.Navigator
+      screenOptions={({ route }) => ({
+        headerShown: false,
+        tabBarActiveTintColor: "#0099ff",
+        tabBarInactiveTintColor: "gray",
+        tabBarStyle: {
+          backgroundColor: "#fff",
+          borderTopWidth: 1,
+          borderTopColor: "#ddd",
+          height: 60,
+          paddingBottom: 5,
+        },
+        tabBarIcon: ({ color, size }) => {
+          let iconName;
+
+          if (route.name === "Home") iconName = "home";
+          else if (route.name === "Order") iconName = "calendar";
+          else if (route.name === "Payment") iconName = "card";
+
+          return <Ionicons name={iconName} size={size} color={color} />;
+        },
+      })}
+    >
+      <Tab.Screen name="Home" component={HomeScreen} options={{ title: "Trang chủ" }} />
+      <Tab.Screen name="Order" component={OrderScreen} options={{ title: "Đặt bàn" }} />
+      <Tab.Screen name="Payment" component={PaymentScreen} options={{ title: "Thanh toán" }} />
+    </Tab.Navigator>
+  );
+}
