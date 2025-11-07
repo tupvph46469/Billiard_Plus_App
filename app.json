@@ -1,10 +1,10 @@
 {
   "expo": {
-    "name": "BilliardPlusApp",
+    "name": "Ứng dụng BilliardPlusApp",
     "slug": "BilliardPlusApp",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/icon.png",
+    "icon": "./assets/logo.jpg",
     "userInterfaceStyle": "light",
     "newArchEnabled": true,
     "splash": {
