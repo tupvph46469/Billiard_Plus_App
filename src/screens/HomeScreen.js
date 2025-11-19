@@ -1,31 +1,193 @@
-//Trang Chu
-
-import React, { useState } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import {
   View,
   Text,
   StyleSheet,
   ScrollView,
   TouchableOpacity,
+  RefreshControl,
+  ActivityIndicator,
   Alert,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import Header from "../components/Header";
 import Menu from "../components/Menu";
+import { listTables } from "../services/tableService";
 
 export default function HomeScreen({ navigation }) {
   const [menuVisible, setMenuVisible] = useState(false);
-  const [tables, setTables] = useState([
-    { id: 3, name: "Bàn 3", status: "Khu vực khách", time: "3 giờ 45 phút" },
-    { id: 1, name: "Bàn 1", status: "Khu vực khách", time: "3 giờ 3 phút" },
-    { id: 5, name: "Bàn 5", status: "Khu vực khách", time: "2 giờ 56 phút" },
-    { id: 7, name: "Bàn 7", status: "Khu vực khách", time: "2 giờ 17 phút" },
-    { id: 12, name: "Bàn 12", status: "Khu vực khách", time: "1 giờ 8 phút" },
-  ]);
+  const [tables, setTables] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+
+  // Fetch dữ liệu từ API
+  const fetchTables = async () => {
+    try {
+      console.log("🔄 Fetching tables from API...");
+      const response = await listTables({ active: true });
+      
+      console.log("✅ API Response:", JSON.stringify(response, null, 2));
+
+      // Xử lý response - API trả về status: 200 hoặc "success"
+      if (response.data && response.data.items) {
+        const tableData = response.data.items;
+        setTables(tableData);
+        console.log(`📊 Loaded ${tableData.length} tables`);
+      } else if (Array.isArray(response.data)) {
+        // Trường hợp API trả về array trực tiếp
+        setTables(response.data);
+        console.log(`📊 Loaded ${response.data.length} tables`);
+      } else {
+        console.warn("⚠️ Unexpected response format:", response);
+        setTables([]);
+      }
+    } catch (error) {
+      console.error("❌ Error fetching tables:", error);
+      Alert.alert(
+        "Lỗi kết nối",
+        "Không thể tải danh sách bàn. Vui lòng kiểm tra:\n" +
+        "• Backend đang chạy tại http://192.168.0.100:3000\n" +
+        "• MongoDB đã có dữ liệu\n" +
+        "• Kết nối mạng ổn định",
+        [
+          { text: "Thử lại", onPress: () => fetchTables() },
+          { text: "OK", style: "cancel" }
+        ]
+      );
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  };
+
+  // Load data khi component mount
+  useEffect(() => {
+    fetchTables();
+  }, []);
+
+  // Pull to refresh
+  const onRefresh = useCallback(() => {
+    setRefreshing(true);
+    fetchTables();
+  }, []);
+
+  // Tính thời gian chơi nếu bàn đang playing
+  const getPlayingTime = (table) => {
+    if (table.status !== "playing" || !table.currentSession) {
+      return null;
+    }
+
+    const startTime = new Date(table.currentSession.startAt);
+    const now = new Date();
+    const diffMs = now - startTime;
+    const diffMins = Math.floor(diffMs / 60000);
+    const hours = Math.floor(diffMins / 60);
+    const minutes = diffMins % 60;
+
+    return `${hours} giờ ${minutes} phút`;
+  };
+
+  // Render từng bàn
+  const renderTable = (table) => {
+    const isPlaying = table.status === "playing";
+    const playingTime = getPlayingTime(table);
+    const areaName = table.areaId?.name || "Chưa có khu vực";
+    const areaColor = table.areaId?.color || "#0099ff";
+
+    return (
+      <View 
+        key={table._id} 
+        style={[
+          styles.tableCard,
+          { borderLeftColor: isPlaying ? "#00d68f" : areaColor }
+        ]}
+      >
+        <View style={styles.tableHeader}>
+          <View style={styles.tableIconContainer}>
+            <Ionicons 
+              name={isPlaying ? "play-circle" : "bookmark"} 
+              size={24} 
+              color={isPlaying ? "#00d68f" : areaColor} 
+            />
+          </View>
+          <View style={styles.tableInfo}>
+            <Text style={styles.tableStatus}>
+              {areaName} • {isPlaying ? "Đang chơi" : "Trống"}
+            </Text>
+          </View>
+          {isPlaying && (
+            <View style={styles.playingBadge}>
+              <Text style={styles.playingBadgeText}>PLAYING</Text>
+            </View>
+          )}
+        </View>
+
+        <View style={styles.tableBody}>
+          <Text style={styles.tableName}>{table.name}</Text>
+          
+          <View style={styles.tableDetails}>
+            {isPlaying && playingTime ? (
+              <View style={styles.detailRow}>
+                <Ionicons name="time-outline" size={16} color="#00d68f" />
+                <Text style={[styles.detailText, { color: "#00d68f", fontWeight: "600" }]}>
+                  {playingTime}
+                </Text>
+              </View>
+            ) : null}
+            
+            <View style={styles.detailRow}>
+              <Ionicons name="cash-outline" size={16} color="#999" />
+              <Text style={styles.detailText}>
+                {table.ratePerHour?.toLocaleString("vi-VN")} đ/giờ
+              </Text>
+            </View>
+
+            {table.code && (
+              <View style={styles.detailRow}>
+                <Ionicons name="pricetag-outline" size={16} color="#999" />
+                <Text style={styles.detailText}>{table.code}</Text>
+              </View>
+            )}
+          </View>
+        </View>
+      </View>
+    );
+  };
+
+  // Nhóm bàn theo khu vực
+  const groupTablesByArea = () => {
+    const grouped = {};
+    tables.forEach(table => {
+      const areaName = table.areaId?.name || "Chưa phân khu";
+      if (!grouped[areaName]) {
+        grouped[areaName] = [];
+      }
+      grouped[areaName].push(table);
+    });
+    return grouped;
+  };
 
   const handleAddTable = () => {
-   navigation.navigate("OrderScreen");
+    navigation.navigate("OrderScreen");
   };
+
+  // Loading state
+  if (loading) {
+    return (
+      <View style={styles.container}>
+        <Header
+          onMenuPress={() => setMenuVisible(true)}
+          onNotificationPress={() => navigation.navigate("Notifications")}
+        />
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color="#0099ff" />
+          <Text style={styles.loadingText}>Đang tải dữ liệu...</Text>
+        </View>
+      </View>
+    );
+  }
+
+  const groupedTables = groupTablesByArea();
 
   return (
     <View style={styles.container}>
@@ -40,36 +202,35 @@ export default function HomeScreen({ navigation }) {
         navigation={navigation}
       />
 
-      {/* Danh sách bàn */}
-      <ScrollView style={styles.tableList}>
-        {tables.map((table) => (
-          <View key={table.id} style={styles.tableCard}>
-            <View style={styles.tableHeader}>
-              <View style={styles.tableIconContainer}>
-                <Ionicons name="bookmark" size={24} color="#0099ff" />
-              </View>
-              <View style={styles.tableInfo}>
-                <Text style={styles.tableStatus}>{table.status}</Text>
-              </View>
-            </View>
-            <View style={styles.tableBody}>
-              <Text style={styles.tableName}>{table.name}</Text>
-              <View style={styles.tableDetails}>
-                <View style={styles.detailRow}>
-                  <Ionicons name="time-outline" size={16} color="#999" />
-                  <Text style={styles.detailText}>{table.time}</Text>
-                </View>
-                <View style={styles.detailRow}>
-                  <Ionicons name="cash-outline" size={16} color="#999" />
-                  <Text style={styles.detailText}>Tính theo giờ</Text>
-                </View>
-              </View>
-            </View>
+      {/* Danh sách bàn theo khu vực */}
+      <ScrollView 
+        style={styles.tableList}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+        }
+      >
+        {Object.keys(groupedTables).length === 0 ? (
+          <View style={styles.emptyContainer}>
+            <Ionicons name="albums-outline" size={64} color="#ccc" />
+            <Text style={styles.emptyText}>Chưa có bàn nào</Text>
+            <Text style={styles.emptySubText}>
+              Vui lòng thêm dữ liệu vào MongoDB
+            </Text>
           </View>
-        ))}
+        ) : (
+          Object.entries(groupedTables).map(([areaName, areaTables]) => (
+            <View key={areaName} style={styles.areaSection}>
+              <View style={styles.areaHeader}>
+                <Text style={styles.areaTitle}>{areaName}</Text>
+                <Text style={styles.areaCount}>({areaTables.length} bàn)</Text>
+              </View>
+              {areaTables.map(renderTable)}
+            </View>
+          ))
+        )}
       </ScrollView>
 
-      {/* Nút Tạo đơn (floating button) */}
+      {/* Nút Tạo đơn */}
       <TouchableOpacity style={styles.addButton} onPress={handleAddTable}>
         <Ionicons name="add" size={28} color="#fff" />
         <Text style={styles.addButtonText}>Tạo đơn</Text>
@@ -83,50 +244,64 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: "#f5f5f5",
   },
-  header: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    paddingHorizontal: 15,
-    paddingVertical: 15,
-    backgroundColor: "#fff",
-    borderBottomWidth: 1,
-    borderBottomColor: "#e0e0e0",
-  },
-  headerLogo: {
-    width: 50,
-    height: 50,
-  },
-  notificationIcon: {
-    position: "relative",
-  },
-  badge: {
-    position: "absolute",
-    right: -5,
-    top: -5,
-    backgroundColor: "#ff4444",
-    borderRadius: 10,
-    width: 20,
-    height: 20,
+  loadingContainer: {
+    flex: 1,
     justifyContent: "center",
     alignItems: "center",
   },
-  badgeText: {
-    color: "#fff",
-    fontSize: 12,
-    fontWeight: "bold",
+  loadingText: {
+    marginTop: 12,
+    fontSize: 16,
+    color: "#666",
+  },
+  emptyContainer: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    paddingVertical: 60,
+  },
+  emptyText: {
+    fontSize: 18,
+    color: "#999",
+    marginTop: 16,
+    fontWeight: "600",
+  },
+  emptySubText: {
+    fontSize: 14,
+    color: "#bbb",
+    marginTop: 8,
+    textAlign: "center",
   },
   tableList: {
     flex: 1,
     paddingHorizontal: 10,
     paddingTop: 10,
   },
+  areaSection: {
+    marginBottom: 20,
+  },
+  areaHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 8,
+    paddingVertical: 8,
+    marginBottom: 8,
+  },
+  areaTitle: {
+    fontSize: 18,
+    fontWeight: "bold",
+    color: "#333",
+  },
+  areaCount: {
+    fontSize: 14,
+    color: "#999",
+    marginLeft: 8,
+  },
   tableCard: {
     backgroundColor: "#fff",
     borderRadius: 8,
     marginBottom: 10,
     borderLeftWidth: 4,
-    borderLeftColor: "#0099ff",
     elevation: 2,
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 1 },
@@ -149,6 +324,17 @@ const styles = StyleSheet.create({
   tableStatus: {
     fontSize: 14,
     color: "#666",
+  },
+  playingBadge: {
+    backgroundColor: "#00d68f",
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 4,
+  },
+  playingBadgeText: {
+    color: "#fff",
+    fontSize: 10,
+    fontWeight: "bold",
   },
   tableBody: {
     padding: 12,
