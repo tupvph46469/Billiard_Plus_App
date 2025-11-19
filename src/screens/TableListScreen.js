@@ -11,6 +11,9 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { tableService } from "../services/tableService";
 import { listAreas } from "../services/areaService";
+import { sessionService } from "../services/sessionService";
+import Header from "../components/Header";
+import Menu from "../components/Menu"; // ✅ THÊM: Import Menu component
 
 export default function TableListScreen({ navigation }) {
   const [tables, setTables] = useState([]);
@@ -18,32 +21,41 @@ export default function TableListScreen({ navigation }) {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [selectedArea, setSelectedArea] = useState(null);
+  const [sessions, setSessions] = useState([]);
+  const [currentTime, setCurrentTime] = useState(new Date());
+  const [realTimeData, setRealTimeData] = useState({});
+  const [menuVisible, setMenuVisible] = useState(false); // ✅ THÊM: State cho menu
 
-  // Fetch areas từ API
+  // ✅ SỬA: Handle menu và notification giống HomeScreen
+  const handleMenuPress = () => {
+    console.log('Menu pressed');
+    setMenuVisible(true); // ✅ Show menu thay vì drawer
+  };
+
+  const handleNotificationPress = () => {
+    console.log('Notification pressed');
+    navigation.navigate('Notifications'); // ✅ Navigate đến screen đúng
+  };
+
   const loadAreas = useCallback(async () => {
     try {
-      console.log('🔄 Loading areas...');
       const response = await listAreas();
       
       if (response?.data?.data) {
         const areasData = response.data.data;
-        console.log('📋 Areas data:', areasData);
         setAreas(areasData);
         
-        // ✅ SỬA: Dùng id thay vì _id
         if (areasData.length > 0) {
           const firstAreaId = areasData[0].id || areasData[0]._id;
           setSelectedArea(firstAreaId);
-          console.log('🎯 Selected default area:', firstAreaId, areasData[0].name);
         }
       }
     } catch (error) {
-      console.error('❌ Error loading areas:', error);
+      console.error('Error loading areas:', error);
       setAreas([]);
     }
   }, []);
 
-  // Fetch tables từ API với session info
   const loadTables = useCallback(async () => {
     try {
       const res = await tableService.list({ 
@@ -51,96 +63,164 @@ export default function TableListScreen({ navigation }) {
         sort: "orderIndex",
         active: true
       });
-      console.log('📋 Tables response:', res);
       
       if (res?.data?.items) {
-        console.log('📋 Tables data:', res.data.items);
         setTables(res.data.items);
       }
     } catch (error) {
-      console.error('❌ Error loading tables:', error);
+      console.error('Error loading tables:', error);
       setTables([]);
     }
   }, []);
 
-  // Load data lần đầu
+  const loadSessions = useCallback(async () => {
+    try {
+      const response = await sessionService.list({ status: 'open', limit: 100 });
+      
+      let sessionsData = [];
+      
+      if (response?.data?.items) {
+        sessionsData = response.data.items;
+      } else if (response?.items) {
+        sessionsData = response.items;
+      } else if (response?.data) {
+        sessionsData = Array.isArray(response.data) ? response.data : [response.data];
+      } else if (Array.isArray(response)) {
+        sessionsData = response;
+      }
+      
+      setSessions(sessionsData);
+    } catch (error) {
+      console.error('Error loading sessions:', error);
+      setSessions([]);
+    }
+  }, []);
+
   const loadData = useCallback(async () => {
     setLoading(true);
     try {
-      await Promise.all([loadAreas(), loadTables()]);
+      await Promise.all([loadAreas(), loadTables(), loadSessions()]);
     } finally {
       setLoading(false);
     }
-  }, [loadAreas, loadTables]);
+  }, [loadAreas, loadTables, loadSessions]);
 
-  // Refresh data
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
     try {
-      await loadTables();
+      await Promise.all([loadTables(), loadSessions()]);
     } finally {
       setRefreshing(false);
     }
-  }, [loadTables]);
+  }, [loadTables, loadSessions]);
+
+  const updateRealTimeData = useCallback(() => {
+    if (sessions.length === 0) return;
+    
+    const newRealTimeData = {};
+    
+    tables.forEach(table => {
+      if (table.status === 'playing') {
+        const session = sessions.find(s => 
+          String(s.table) === String(table._id || table.id) ||
+          (s.status === 'open')
+        );
+        
+        if (session?.startTime) {
+          const now = new Date();
+          const start = new Date(session.startTime);
+          const diffInMinutes = Math.floor((now - start) / (1000 * 60));
+          
+          if (diffInMinutes >= 0) {
+            const hours = Math.floor(diffInMinutes / 60);
+            const minutes = diffInMinutes % 60;
+            const timeString = hours > 0 
+              ? `${hours}h${minutes > 0 ? ` ${minutes}m` : ''}` 
+              : `${minutes}m`;
+              
+            newRealTimeData[table._id || table.id] = timeString;
+          }
+        }
+      }
+    });
+    
+    setRealTimeData(newRealTimeData);
+  }, [tables, sessions]);
 
   useEffect(() => {
     loadData();
     
-    // Auto refresh mỗi 30s để cập nhật thời gian chơi
-    const interval = setInterval(loadTables, 30000);
-    return () => clearInterval(interval);
-  }, [loadData, loadTables]);
+    // Auto refresh data every 30 seconds
+    const dataInterval = setInterval(() => {
+      loadTables();
+      loadSessions();
+    }, 30000);
 
-  // Tính thời gian đã chơi từ currentSession
-  const calculateTimeUsed = (table) => {
-    if (!table.currentSession?.startTime) return '';
+    return () => clearInterval(dataInterval);
+  }, [loadData, loadTables, loadSessions]);
 
-    const now = new Date();
-    const start = new Date(table.currentSession.startTime);
-    const diffInMinutes = Math.floor((now - start) / (1000 * 60));
-    
-    const hours = Math.floor(diffInMinutes / 60);
-    const minutes = diffInMinutes % 60;
-    
-    if (hours > 0) {
-      return `${hours}h${minutes > 0 ? ` ${minutes}m` : ''}`;
+  useEffect(() => {
+    // Update time every second
+    const timeInterval = setInterval(() => {
+      setCurrentTime(new Date());
+      updateRealTimeData();
+    }, 1000);
+
+    return () => clearInterval(timeInterval);
+  }, [updateRealTimeData]);
+
+  useEffect(() => {
+    // Update real-time data when sessions or tables change
+    if (tables.length > 0 && sessions.length > 0) {
+      updateRealTimeData();
     }
-    return `${minutes}m`;
-  };
+  }, [tables, sessions, updateRealTimeData]);
 
-  // ✅ SỬA: Lọc bàn theo area được chọn - Fix ID mapping
+  const getStatusText = useCallback((table) => {
+    switch (table.status) {
+      case 'playing':
+        const tableId = table._id || table.id;
+        const realTime = realTimeData[tableId];
+        return realTime || '0m';
+      case 'reserved':
+        return 'Đã đặt';
+      case 'maintenance':
+        return 'Bảo trì';
+      default:
+        return 'Trống';
+    }
+  }, [realTimeData]);
+
   const filteredTables = tables.filter(table => {
     if (!selectedArea) {
-      console.log('⚠️ No area selected, showing all tables');
       return true;
     }
     
-    // ✅ SỬA: Handle cả _id và id từ backend
     const tableAreaId = table.areaId?._id || table.areaId?.id || table.areaId;
     const isMatch = String(tableAreaId) === String(selectedArea);
-    
-    console.log(`🔍 Table ${table.name}: areaId=${tableAreaId}, selectedArea=${selectedArea}, match=${isMatch}`);
     
     return isMatch;
   });
 
-  console.log(`📊 Total tables: ${tables.length}, Filtered tables: ${filteredTables.length}, Selected area: ${selectedArea}`);
+  const mappedTables = filteredTables.map(table => {
+    const session = sessions.find(s => String(s.table) === String(table._id || table.id));
+    const tableId = table._id || table.id;
+    const timeUsed = table.status === 'playing' ? (realTimeData[tableId] || '0m') : '';
+    
+    return {
+      id: tableId,
+      name: table.name,
+      status: table.status,
+      timeUsed: timeUsed,
+      areaId: table.areaId?._id || table.areaId?.id || table.areaId,
+      areaName: table.areaId?.name || 'Chưa phân vùng',
+      sessionId: session?._id || session?.id || null,
+      ratePerHour: table.ratePerHour || 0,
+      itemsCount: session?.items?.length || 0,
+      active: table.active
+    };
+  });
 
-  // Map data từ API về format hiển thị
-  const mappedTables = filteredTables.map(table => ({
-    id: table._id || table.id,
-    name: table.name,
-    status: table.status,
-    timeUsed: calculateTimeUsed(table),
-    areaId: table.areaId?._id || table.areaId?.id || table.areaId,
-    areaName: table.areaId?.name || 'Chưa phân vùng',
-    sessionId: table.currentSession?.id || null,
-    ratePerHour: table.ratePerHour || 0,
-    itemsCount: table.currentSession?.itemsCount || 0,
-    active: table.active
-  }));
-
-  // Tính toán thống kê dựa trên tables đã lọc
   const totalTables = mappedTables.length;
   const playingTables = mappedTables.filter(table => table.status === 'playing').length;
   const availableTables = mappedTables.filter(table => table.status === 'available').length;
@@ -149,14 +229,12 @@ export default function TableListScreen({ navigation }) {
 
   const handleTablePress = (table) => {
     if (table.status === 'available') {
-      console.log(`Bàn ${table.name} được chọn để đặt`);
       navigation.navigate('OrderScreen', { 
         tableId: table.id,
         tableName: table.name,
         ratePerHour: table.ratePerHour
       });
     } else if (table.status === 'playing') {
-      console.log(`Bàn ${table.name} đang chơi - xem chi tiết`);
       navigation.navigate('OrderDetail', { 
         tableId: table.id,
         tableName: table.name,
@@ -164,18 +242,11 @@ export default function TableListScreen({ navigation }) {
         timeUsed: table.timeUsed,
         itemsCount: table.itemsCount
       });
-    } else if (table.status === 'maintenance') {
-      console.log(`Bàn ${table.name} đang bảo trì`);
-    } else if (table.status === 'reserved') {
-      console.log(`Bàn ${table.name} đã được đặt`);
     }
   };
 
-  // ✅ SỬA: Handle area selection - Fix ID mapping
   const handleAreaPress = (area) => {
     const areaId = area.id || area._id;
-    console.log('🎯 Area selected:', areaId);
-    console.log('📍 Selected area data:', area);
     setSelectedArea(areaId);
   };
 
@@ -198,7 +269,6 @@ export default function TableListScreen({ navigation }) {
         ]}>
           {item.name}
         </Text>
-        {/* Debug indicator */}
         {isSelected && <View style={styles.selectedIndicator} />}
       </TouchableOpacity>
     );
@@ -228,63 +298,78 @@ export default function TableListScreen({ navigation }) {
     }
   };
 
-  const getStatusText = (table) => {
-    switch (table.status) {
-      case 'playing':
-        return table.timeUsed || '0m';
-      case 'reserved':
-        return 'Đã đặt';
-      case 'maintenance':
-        return 'Bảo trì';
-      default:
-        return 'Trống';
-    }
+  const renderTableItem = ({ item }) => {
+    const statusText = getStatusText(item);
+    
+    return (
+      <TouchableOpacity
+        style={[styles.tableCard, getTableCardStyle(item.status)]}
+        onPress={() => handleTablePress(item)}
+        activeOpacity={0.7}
+      >
+        <View style={styles.tableContent}>
+          <Text style={[styles.tableNumber, getTableTextStyle(item.status)]}>
+            {item.name.replace('Bàn ', '').replace('VIP ', '')}
+          </Text>
+          
+          <Text style={[styles.tableRate, getTableTextStyle(item.status)]}>
+            {(item.ratePerHour / 1000).toFixed(0)}k/h
+          </Text>
+          
+          <Text style={[styles.statusText, getTableTextStyle(item.status)]}>
+            {statusText}
+          </Text>
+
+          {item.itemsCount > 0 && (
+            <View style={styles.itemsBadge}>
+              <Text style={styles.itemsBadgeText}>{item.itemsCount}</Text>
+            </View>
+          )}
+        </View>
+      </TouchableOpacity>
+    );
   };
-
-  const renderTableItem = ({ item }) => (
-    <TouchableOpacity
-      style={[styles.tableCard, getTableCardStyle(item.status)]}
-      onPress={() => handleTablePress(item)}
-      activeOpacity={0.7}
-    >
-      <View style={styles.tableContent}>
-        <Text style={[styles.tableNumber, getTableTextStyle(item.status)]}>
-          {item.name.replace('Bàn ', '').replace('VIP ', '')}
-        </Text>
-        
-        <Text style={[styles.tableRate, getTableTextStyle(item.status)]}>
-          {(item.ratePerHour / 1000).toFixed(0)}k/h
-        </Text>
-        
-        <Text style={[styles.statusText, getTableTextStyle(item.status)]}>
-          {getStatusText(item)}
-        </Text>
-
-        {item.itemsCount > 0 && (
-          <View style={styles.itemsBadge}>
-            <Text style={styles.itemsBadgeText}>{item.itemsCount}</Text>
-          </View>
-        )}
-      </View>
-    </TouchableOpacity>
-  );
 
   if (loading) {
     return (
-      <SafeAreaView style={styles.container}>
+      <View style={styles.container}>
         <StatusBar barStyle="dark-content" backgroundColor="#f5f5f5" />
+        
+        {/* ✅ SỬA: Header + Menu giống HomeScreen */}
+        <Header 
+          onMenuPress={handleMenuPress}
+          onNotificationPress={handleNotificationPress}
+        />
+
+        <Menu
+          visible={menuVisible}
+          onClose={() => setMenuVisible(false)}
+          navigation={navigation}
+        />
+
         <View style={styles.loadingContainer}>
           <Text>Đang tải dữ liệu...</Text>
         </View>
-      </SafeAreaView>
+      </View>
     );
   }
 
   return (
-    <SafeAreaView style={styles.container}>
+    <View style={styles.container}>
       <StatusBar barStyle="dark-content" backgroundColor="#f5f5f5" />
+      
+      {/* ✅ SỬA: Header + Menu giống HomeScreen */}
+      <Header 
+        onMenuPress={handleMenuPress}
+        onNotificationPress={handleNotificationPress}
+      />
 
-      {/* Phần thống kê - Hiển thị cho area được chọn */}
+      <Menu
+        visible={menuVisible}
+        onClose={() => setMenuVisible(false)}
+        navigation={navigation}
+      />
+
       <View style={styles.statsContainer}>
         <View style={styles.statItem}>
           <Text style={styles.statLabel}>Đang chơi: </Text>
@@ -305,7 +390,6 @@ export default function TableListScreen({ navigation }) {
       </View>
 
       <View style={styles.mainContent}>
-        {/* Sidebar areas */}
         <View style={styles.sidebar}>
           {areas.length > 0 ? (
             <FlatList
@@ -321,7 +405,6 @@ export default function TableListScreen({ navigation }) {
           )}
         </View>
 
-        {/* Tables grid - Chỉ hiển thị bàn của area được chọn */}
         <View style={styles.tableArea}>
           {mappedTables.length > 0 ? (
             <FlatList
@@ -355,14 +438,15 @@ export default function TableListScreen({ navigation }) {
           )}
         </View>
       </View>
-    </SafeAreaView>
+    </View>
   );
 }
 
+// ✅ SỬA: Thay SafeAreaView thành View để giống HomeScreen
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#e8e6f0',
+    backgroundColor: '#e8e6f0', // ✅ Hoặc đổi thành '#f5f5f5' như HomeScreen
   },
   loadingContainer: {
     flex: 1,
