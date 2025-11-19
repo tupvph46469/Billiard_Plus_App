@@ -33,5 +33,5 @@ app.get('/api/v1/tables', async (req, res) => {
 });
 
 app.listen(3000, '0.0.0.0', () => {
-  console.log('🚀 Server running on http://192.168.1.7:3000');
+  console.log('🚀 Server running on http://192.168.1.6:3000');
 });

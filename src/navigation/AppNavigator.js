@@ -51,7 +51,7 @@ export default function AppNavigator() {
         <Stack.Screen name="Debts" component={DebtsScreen} />
         <Stack.Screen name="Settings" component={SettingsScreen} />
         <Stack.Screen name="Notifications" component={NotificationsScreen} />
-        <Stack.Screen name="BillDetail" component={InvoiceDetailScreen} />
+        <Stack.Screen name="InvoiceDetail" component={InvoiceDetailScreen} />
       </Stack.Navigator>
     </NavigationContainer>
   );
