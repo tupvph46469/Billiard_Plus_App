@@ -14,6 +14,8 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { sessionService } from '../services/sessionService';
+import { tableService } from '../services/tableService'; // Add import
+import { listAreas } from '../services/areaService'; // Add import
 import { CONFIG } from '../constants/config';
 import { Ionicons } from '@expo/vector-icons';
 import api from '../services/api'; // Import api để fetch products
@@ -53,7 +55,7 @@ const showToast = (message, type = 'success') => {
 
 export default function OrderDetail({ navigation, route }) {
   const [selectedTab, setSelectedTab] = useState('promotion');
-  const [area, setArea] = useState('Khu vực 1 - 4');
+  const [area, setArea] = useState('Đang tải...'); // Change initial state
   const [showMenu, setShowMenu] = useState(false);
   const [sessionData, setSessionData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -63,6 +65,40 @@ export default function OrderDetail({ navigation, route }) {
 
   // Lấy params từ navigation
   const { sessionId, tableName, tableId, ratePerHour } = route?.params || {};
+
+  // Load area information for the table
+  const loadAreaInfo = useCallback(async () => {
+    try {
+      if (tableId) {
+        // Get table details
+        const tableResponse = await tableService.getById(tableId);
+        const table = tableResponse.data || tableResponse;
+        
+        if (table.areaId) {
+          // Get areas list to find the area name
+          const areasResponse = await listAreas();
+          const areas = areasResponse.data?.data || areasResponse.data || areasResponse;
+          
+          const tableArea = areas.find(area => {
+            const areaId = area._id || area.id;
+            const tableAreaId = table.areaId._id || table.areaId.id || table.areaId;
+            return String(areaId) === String(tableAreaId);
+          });
+          
+          if (tableArea) {
+            setArea(tableArea.name);
+          } else {
+            setArea('Chưa phân vùng');
+          }
+        } else {
+          setArea('Chưa phân vùng');
+        }
+      }
+    } catch (error) {
+      console.error('Error loading area info:', error);
+      setArea('Khu vực không xác định');
+    }
+  }, [tableId]);
 
   // Load session data từ API
   const loadSessionData = useCallback(async () => {
@@ -105,7 +141,7 @@ export default function OrderDetail({ navigation, route }) {
       console.log('✅ Session saved successfully');
       
       // Hiển thị toast thành công
-      showToast('✅ Đã lưu thông tin phiên chơi thành công');
+      showToast('Lưu thành công');
       
       // Chuyển màn hình ngay lập tức
       console.log('🔄 Navigating back to Main Tab...');
@@ -122,14 +158,22 @@ export default function OrderDetail({ navigation, route }) {
     }
   }, [loadSessionData, navigation]);
 
-  // Load session data khi component mount
+  // Load session data và area info khi component mount
   useEffect(() => {
-    if (sessionId) {
-      loadSessionData();
-    } else {
-      setLoading(false);
-    }
-  }, [sessionId]);
+    const loadData = async () => {
+      if (sessionId) {
+        await loadSessionData();
+      }
+      if (tableId) {
+        await loadAreaInfo();
+      }
+      if (!sessionId && !tableId) {
+        setLoading(false);
+      }
+    };
+    
+    loadData();
+  }, [sessionId, tableId]);
 
   // Load products data khi có session items
   useEffect(() => {
@@ -376,14 +420,6 @@ export default function OrderDetail({ navigation, route }) {
         </TouchableOpacity>
       </View>
 
-      {/* Session Info */}
-      <View style={styles.sessionInfo}>
-        <Text style={styles.sessionText}>
-          Phiên: #{(sessionId || '').slice(-6)} • 
-          Thời gian: {Math.floor(playingTime / 60)}h{playingTime % 60}m
-        </Text>
-      </View>
-
       {/* Dropdown */}
       <View style={styles.dropdownContainer}>
         <TouchableOpacity style={styles.dropdown}>
@@ -456,7 +492,7 @@ export default function OrderDetail({ navigation, route }) {
             });
           }}
         >
-          <Text style={styles.addButtonText}>● Thêm</Text>
+          <Text style={styles.addButtonText}>+ Thêm</Text>
         </TouchableOpacity>
 
         <TouchableOpacity 
@@ -563,11 +599,6 @@ const styles = StyleSheet.create({
   },
   headerTitle: { fontSize: 18, fontWeight: '600' },
 
-  sessionInfo: {
-    backgroundColor: '#e3f3ff',
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-  },
   sessionText: {
     fontSize: 14,
     color: '#333',

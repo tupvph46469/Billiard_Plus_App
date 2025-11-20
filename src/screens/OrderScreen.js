@@ -8,7 +8,8 @@ import {
   StatusBar,
   Image,
   ActivityIndicator,
-  Alert,
+  ToastAndroid, // Thêm import
+  Platform, // Thêm import
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { getMenuCategories, getMenuItems } from '../services/productService';
@@ -60,6 +61,19 @@ function getCategoryIcon(category, isActive) {
   return <Ionicons name="grid-outline" size={size} color={color} />;
 }
 
+// Thêm hàm showToast giống OrderDetail
+const showToast = (message, type = 'success') => {
+  if (Platform.OS === 'android') {
+    ToastAndroid.show(message, ToastAndroid.SHORT);
+  } else {
+    // Cho iOS, sử dụng Alert với timeout ngắn
+    Alert.alert('', message, [], { cancelable: true });
+    setTimeout(() => {
+      // Tự động đóng alert sau 2 giây (iOS không có API để đóng)
+    }, 2000);
+  }
+};
+
 export default function OrderScreen({ navigation, route }) {
   const [selectedCategory, setSelectedCategory] = useState(null);
   const [categories, setCategories] = useState([]);
@@ -107,14 +121,14 @@ export default function OrderScreen({ navigation, route }) {
 
       if (!tableId) {
         console.error('❌ No tableId available. Route params:', route.params);
-        Alert.alert('Lỗi', 'Không tìm thấy thông tin bàn. Vui lòng quay lại và chọn bàn lại.');
+        showToast('❌ Không tìm thấy thông tin bàn. Vui lòng quay lại và chọn bàn lại.', 'error');
         return;
       }
 
-      // Bước 1: Tạo session mới - SỬA FORMAT THEO BACKEND
+      // Bước 1: Tạo session mới
       const sessionData = {
         tableId: tableId,
-        startAt: new Date(),  // Đổi từ 'startTime' thành 'startAt'
+        startAt: new Date(),
         note: `Bắt đầu với ${product.name}`
       };
 
@@ -140,11 +154,8 @@ export default function OrderScreen({ navigation, route }) {
 
       setCurrentSession(updatedSession);
 
-      Alert.alert(
-        '🎉 Bắt đầu phiên chơi!',
-        `Đã mở phiên cho ${tableName} và thêm "${product.name}"`,
-        [{ text: 'OK' }]
-      );
+      // Hiển thị toast đơn giản
+      showToast('Thêm thành công');
 
     } catch (error) {
       console.error('❌ Error creating session or adding item:', error);
@@ -161,7 +172,8 @@ export default function OrderScreen({ navigation, route }) {
         errorMessage = error.response.data.message;
       }
 
-      Alert.alert('Lỗi', errorMessage);
+      // Hiển thị toast lỗi
+      showToast(`❌ ${errorMessage}`, 'error');
     }
   }, [tableId, tableName, route.params]);
 
@@ -193,11 +205,8 @@ export default function OrderScreen({ navigation, route }) {
         // Backend trả về { data: session, message, status }
         setCurrentSession(response.data);
 
-        Alert.alert(
-          '✅ Thành công',
-          `Đã thêm "${product.name}" vào đơn`,
-          [{ text: 'OK' }]
-        );
+        // Hiển thị toast đơn giản
+        showToast('Thêm thành công');
 
         console.log('✅ Item added to existing session');
       }
@@ -212,7 +221,8 @@ export default function OrderScreen({ navigation, route }) {
         errorMessage = 'Phiên đã đóng, không thể thêm món';
       }
 
-      Alert.alert('Lỗi', errorMessage);
+      // Hiển thị toast lỗi
+      showToast(`❌ ${errorMessage}`, 'error');
     } finally {
       setAddingItem(null);
     }
@@ -286,16 +296,32 @@ export default function OrderScreen({ navigation, route }) {
         ratePerHour: ratePerHour
       });
     } else {
-      Alert.alert('Thông báo', 'Chưa có món nào trong đơn');
+      // Hiển thị toast thông báo
+      showToast('ℹ️ Chưa có món nào trong đơn', 'info');
     }
   }, [currentSession, navigation, tableName, tableId, ratePerHour]);
+
+  // Sửa cart button để dùng toast
+  const handleCartPress = () => {
+    if (currentSession) {
+      // Chuyển đến màn hình chi tiết đơn hàng
+      navigation.navigate('OrderDetail', {
+        sessionId: currentSession._id || currentSession.id,
+        tableName: tableName,
+        tableId: tableId
+      });
+    } else {
+      // Hiển thị toast thông báo
+      showToast('ℹ️ Chưa có món nào trong đơn', 'info');
+    }
+  };
 
   // Render product item với button add to cart
   const renderProductItem = (item) => {
     const productId = item._id || item.id;
     const isAdding = addingItem === productId;
-     console.log('ITEM >>>', JSON.stringify(item, null, 2));
-  console.log('IMAGES FIELD >>>', item.images);
+    console.log('ITEM >>>', JSON.stringify(item, null, 2));
+    console.log('IMAGES FIELD >>>', item.images);
     const imageUrl = getProductImageUrl(item);
     return (
       <View key={productId} style={styles.itemCard}>
@@ -388,32 +414,11 @@ export default function OrderScreen({ navigation, route }) {
 
         <View style={styles.tableInfo}>
           <Text style={styles.tableTitle}>{tableName || 'Đặt món'}</Text>
-          {currentSession && (
-            <Text style={styles.sessionInfo}>
-              Phiên: #{((currentSession._id || currentSession.id) || '').slice(-6)}
-            </Text>
-          )}
-          {!currentSession && (
-            <Text style={styles.sessionInfo}>
-              Chọn món để bắt đầu phiên
-            </Text>
-          )}
         </View>
 
         <TouchableOpacity
           style={styles.cartButton}
-          onPress={() => {
-            if (currentSession) {
-              // Chuyển đến màn hình chi tiết đơn hàng
-              navigation.navigate('OrderDetail', {
-                sessionId: currentSession._id || currentSession.id,
-                tableName: tableName,
-                tableId: tableId
-              });
-            } else {
-              Alert.alert('Thông báo', 'Chưa có món nào trong đơn');
-            }
-          }}
+          onPress={handleCartPress} // Sử dụng function mới
         >
           <Ionicons name="receipt" size={24} color={currentSession ? "#333" : "#ccc"} />
           {currentSession?.items?.length > 0 && (
