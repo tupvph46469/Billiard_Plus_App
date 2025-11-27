@@ -27,10 +27,10 @@ function getProductImageUrl(product) {
   if (!product || !product.images || !Array.isArray(product.images) || product.images.length === 0) {
     return null;
   }
-  
+
   const imagePath = product.images[0];
   if (!imagePath) return null;
-  
+
   if (imagePath.startsWith('http://') || imagePath.startsWith('https://')) {
     return imagePath;
   } else if (imagePath.startsWith('/')) {
@@ -73,18 +73,18 @@ export default function OrderDetail({ navigation, route }) {
         // Get table details
         const tableResponse = await tableService.getById(tableId);
         const table = tableResponse.data || tableResponse;
-        
+
         if (table.areaId) {
           // Get areas list to find the area name
           const areasResponse = await listAreas();
           const areas = areasResponse.data?.data || areasResponse.data || areasResponse;
-          
+
           const tableArea = areas.find(area => {
             const areaId = area._id || area.id;
             const tableAreaId = table.areaId._id || table.areaId.id || table.areaId;
             return String(areaId) === String(tableAreaId);
           });
-          
+
           if (tableArea) {
             setArea(tableArea.name);
           } else {
@@ -106,14 +106,14 @@ export default function OrderDetail({ navigation, route }) {
       setLoading(true);
       const response = await sessionService.getById(sessionId);
       const session = response.data || response;
-      
+
       console.log('📋 Session loaded, product IDs:', session.items?.map(item => ({
         id: item.product,
         name: item.nameSnapshot
       })));
-      
+
       setSessionData(session);
-      
+
       // Tính thời gian chơi hiện tại
       if (session.startTime) {
         const startTime = new Date(session.startTime);
@@ -134,22 +134,22 @@ export default function OrderDetail({ navigation, route }) {
     try {
       console.log('💾 Saving session data...');
       setSaving(true);
-      
+
       // Lưu thông tin session (refresh data để đồng bộ)
       await loadSessionData();
-      
+
       console.log('✅ Session saved successfully');
-      
+
       // Hiển thị toast thành công
       showToast('Lưu thành công');
-      
+
       // Chuyển màn hình ngay lập tức
       console.log('🔄 Navigating back to Main Tab...');
       navigation.navigate('Main', {
         screen: 'Table',
         params: { refreshData: true }
       });
-      
+
     } catch (error) {
       console.error('❌ Error saving session:', error);
       showToast('❌ Không thể lưu thông tin. Vui lòng thử lại.', 'error');
@@ -157,6 +157,49 @@ export default function OrderDetail({ navigation, route }) {
       setSaving(false);
     }
   }, [loadSessionData, navigation]);
+
+  // Function handlePayment - TẠO BILL VÀ CHUYỂN SANG THANH TOÁN
+  const handlePayment = useCallback(async () => {
+    try {
+      console.log('💳 Creating bill for payment...');
+      
+      // Tạo bill từ session với trạng thái chưa thanh toán
+      const checkoutResponse = await sessionService.checkout(sessionId, {
+        endAt: new Date(),
+        paymentMethod: 'cash', // Mặc định tiền mặt
+        paid: false, // Chưa thanh toán, chỉ tạo bill
+        note: 'Tạo hóa đơn cho thanh toán'
+      });
+      
+      console.log('✅ Bill created:', checkoutResponse);
+      
+      // Lấy thông tin bill từ response
+      const billData = checkoutResponse.data || checkoutResponse;
+      
+      // Chuyển sang màn thanh toán với thông tin bill
+      navigation.navigate('ThanhToan', {
+        sessionId: sessionId,
+        billId: billData._id || billData.id,
+        tableName: tableName,
+        totalAmount: getTotalAmount(),
+        billData: billData
+      });
+      
+    } catch (error) {
+      console.error('❌ Error creating bill:', error);
+      
+      let errorMessage = 'Không thể tạo hóa đơn';
+      if (error.response?.status === 400) {
+        errorMessage = 'Phiên chơi không hợp lệ';
+      } else if (error.response?.status === 404) {
+        errorMessage = 'Không tìm thấy phiên chơi';
+      } else if (error.response?.data?.message) {
+        errorMessage = error.response.data.message;
+      }
+      
+      showToast(`❌ ${errorMessage}`, 'error');
+    }
+  }, [sessionId, tableName, getTotalAmount, navigation]);
 
   // Load session data và area info khi component mount
   useEffect(() => {
@@ -171,7 +214,7 @@ export default function OrderDetail({ navigation, route }) {
         setLoading(false);
       }
     };
-    
+
     loadData();
   }, [sessionId, tableId]);
 
@@ -185,7 +228,7 @@ export default function OrderDetail({ navigation, route }) {
   // Tính thời gian chơi real-time
   useEffect(() => {
     let interval = null;
-    
+
     if (sessionData && sessionData.startTime) {
       interval = setInterval(() => {
         const startTime = new Date(sessionData.startTime);
@@ -223,7 +266,7 @@ export default function OrderDetail({ navigation, route }) {
       });
 
       const productResults = await Promise.all(productPromises);
-      
+
       // Build products cache
       const productsCache = {};
       productResults.forEach(result => {
@@ -242,9 +285,9 @@ export default function OrderDetail({ navigation, route }) {
 
   // Tính tiền giờ chơi
   const getPlayingFee = () => {
-    const hours = Math.ceil(playingTime / 60);
     const hourlyRate = ratePerHour || sessionData?.pricingSnapshot?.ratePerHour || 40000;
-    return hours * hourlyRate;
+    // Tính theo phút, sau đó chuyển về giờ (tỷ lệ chính xác)
+    return Math.round((playingTime / 60) * hourlyRate);
   };
 
   // Tính tổng tiền F&B
@@ -252,7 +295,7 @@ export default function OrderDetail({ navigation, route }) {
     if (!sessionData?.items || sessionData.items.length === 0) {
       return 0;
     }
-    
+
     return sessionData.items.reduce((total, item) => {
       const price = Number(item.priceSnapshot || 0);
       const qty = Number(item.qty || 0);
@@ -268,13 +311,13 @@ export default function OrderDetail({ navigation, route }) {
   // Tính tổng số lượng items
   const getTotalQuantity = () => {
     let total = 1; // Luôn có 1 cho tiền chơi
-    
+
     if (sessionData?.items && sessionData.items.length > 0) {
       total += sessionData.items.reduce((sum, item) => {
         return sum + Number(item.qty || 0);
       }, 0);
     }
-    
+
     return total;
   };
 
@@ -282,19 +325,19 @@ export default function OrderDetail({ navigation, route }) {
   const renderOrderItem = (item, index) => {
     const shouldShowImage = item.type === 'food';
     let imageUrl = null;
-    
+
     if (shouldShowImage && item.product) {
       const product = productsData[item.productId]; // Lấy từ cache
       imageUrl = getProductImageUrl(product);
       console.log(`🖼️ Item ${item.name}: product found=${!!product}, imageUrl=${imageUrl}`);
     }
-    
+
     return (
       <View key={index} style={styles.orderItem}>
         <View style={styles.itemInfo}>
           {shouldShowImage ? (
-            <Image 
-              source={{ 
+            <Image
+              source={{
                 uri: imageUrl || 'https://i.imgur.com/placeholder.png' // Đổi placeholder
               }}
               style={styles.itemImage}
@@ -306,14 +349,14 @@ export default function OrderDetail({ navigation, route }) {
               <Ionicons name="game-controller" size={20} color="#4a5568" />
             </View>
           )}
-          
+
           <View style={styles.itemDetails}>
             <Text style={styles.itemName}>{item.name}</Text>
             {item.type === 'food' && item.unit && (
               <Text style={styles.itemUnit}>Đơn vị: {item.unit}</Text>
             )}
           </View>
-          
+
           <Text style={styles.itemQuantity}>{item.quantity}</Text>
         </View>
         <Text style={styles.itemPrice}>{item.price.toLocaleString()}đ</Text>
@@ -324,14 +367,20 @@ export default function OrderDetail({ navigation, route }) {
   // Tạo danh sách items để hiển thị
   const getOrderItems = () => {
     const items = [];
-    
+
     // 1. Tiền giờ chơi
     const playingFee = getPlayingFee();
-    const playingHours = Math.ceil(playingTime / 60);
-    
+
+    // ✅ SỬA: Tính hiển thị giống TableListScreen
+    const displayHours = Math.floor(playingTime / 60);
+    const displayMinutes = playingTime % 60;
+    const timeDisplay = displayHours > 0
+      ? `${displayHours}h${displayMinutes > 0 ? ` ${displayMinutes}m` : ''}`
+      : `${displayMinutes}m`;
+
     items.push({
       id: 'playing_time',
-      name: `Bida (${playingHours}h${playingTime % 60 > 0 ? ` ${playingTime % 60}m` : ''})`,
+      name: `Bida (${timeDisplay})`, // ✅ Dùng timeDisplay thay vì playingHours
       price: playingFee,
       quantity: 1,
       type: 'service'
@@ -341,7 +390,7 @@ export default function OrderDetail({ navigation, route }) {
     if (sessionData?.items && sessionData.items.length > 0) {
       sessionData.items.forEach((sessionItem, index) => {
         const product = productsData[sessionItem.product];
-        
+
         const orderItem = {
           id: `food_${index}`,
           name: sessionItem.nameSnapshot || 'Món ăn',
@@ -352,7 +401,7 @@ export default function OrderDetail({ navigation, route }) {
           product: product, // Product object từ cache
           unit: product?.unit || null
         };
-        
+
         items.push(orderItem);
       });
     }
@@ -388,8 +437,8 @@ export default function OrderDetail({ navigation, route }) {
       <SafeAreaView style={styles.container}>
         <View style={styles.errorContainer}>
           <Text style={styles.errorText}>Không tìm thấy thông tin phiên chơi</Text>
-          <TouchableOpacity 
-            style={styles.backButtonError} 
+          <TouchableOpacity
+            style={styles.backButtonError}
             onPress={() => navigation.goBack()}
           >
             <Text style={styles.backButtonErrorText}>Quay lại</Text>
@@ -481,8 +530,8 @@ export default function OrderDetail({ navigation, route }) {
 
       {/* Bottom Buttons */}
       <View style={styles.bottomButtons}>
-        <TouchableOpacity 
-          style={styles.addButton} 
+        <TouchableOpacity
+          style={styles.addButton}
           onPress={() => {
             navigation.navigate('OrderScreen', {
               tableId: tableId,
@@ -495,7 +544,7 @@ export default function OrderDetail({ navigation, route }) {
           <Text style={styles.addButtonText}>+ Thêm</Text>
         </TouchableOpacity>
 
-        <TouchableOpacity 
+        <TouchableOpacity
           style={[styles.saveButton, saving && styles.saveButtonDisabled]}
           onPress={handleSave}
           disabled={saving}
@@ -509,11 +558,7 @@ export default function OrderDetail({ navigation, route }) {
 
         <TouchableOpacity
           style={styles.payButton}
-          onPress={() => navigation.navigate('ThanhToan', {
-            sessionId: sessionId,
-            tableName: tableName,
-            totalAmount: getTotalAmount()
-          })}
+          onPress={handlePayment}
         >
           <Text style={styles.payButtonText}>Thanh toán</Text>
         </TouchableOpacity>
@@ -529,7 +574,7 @@ export default function OrderDetail({ navigation, route }) {
           <View style={styles.menuBox}>
             {[
               'Yêu cầu thanh toán',
-              'Lưu & in tạm tính', 
+              'Lưu & in tạm tính',
               'Lưu & in phiếu bếp',
               'In phiếu kiểm đồ',
               'Tạo đơn mới trên bàn này',
@@ -630,10 +675,10 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     alignItems: 'center',
   },
-  itemInfo: { 
-    flexDirection: 'row', 
-    alignItems: 'center', 
-    flex: 1 
+  itemInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1
   },
   itemImage: {
     width: 50,
@@ -654,7 +699,7 @@ const styles = StyleSheet.create({
   itemDetails: {
     flex: 1,
   },
-  itemName: { 
+  itemName: {
     fontSize: 16,
     fontWeight: '500',
     marginBottom: 4,
@@ -672,8 +717,8 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '500',
   },
-  itemPrice: { 
-    fontSize: 16, 
+  itemPrice: {
+    fontSize: 16,
     fontWeight: 'bold',
     marginLeft: 10,
     color: '#2E7D32',

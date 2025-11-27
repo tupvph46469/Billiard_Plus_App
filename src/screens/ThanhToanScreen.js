@@ -1,12 +1,11 @@
 // src/screens/ThanhToanScreen.js
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useMemo } from "react";
 import {
   SafeAreaView, StatusBar, View, Text, TouchableOpacity,
   ScrollView, TextInput, StyleSheet, ActivityIndicator, Alert
 } from "react-native";
 import { Ionicons, FontAwesome5 } from "@expo/vector-icons";
-import { sessionService } from '../services/sessionService';
-import { createBillFromSession } from '../services/billService'; // Import bill service
+import api from '../services/api';
 
 const currency = (n = 0) =>
   (Number(n) || 0).toLocaleString("vi-VN", {
@@ -16,113 +15,73 @@ const currency = (n = 0) =>
 export default function ThanhToanScreen({ navigation, route }) {
   const [paidBy] = useState("Tiền mặt");
   const [customerCash, setCustomerCash] = useState("");
-  const [loading, setLoading] = useState(true);
-  const [sessionData, setSessionData] = useState(null);
-  const [playingTime, setPlayingTime] = useState(0);
-  const [processing, setProcessing] = useState(false); // State cho việc xử lý thanh toán
+  const [processing, setProcessing] = useState(false);
 
-  // Lấy params từ navigation
-  const { sessionId, tableName, totalAmount } = route?.params || {};
+  // Lấy params từ OrderDetail
+  const { sessionId, billId, tableName, totalAmount, billData } = route?.params || {};
 
-  // Load session data
-  useEffect(() => {
-    if (sessionId) {
-      loadSessionData();
-    } else {
-      setLoading(false);
-    }
-  }, [sessionId]);
+  // Lấy bill info từ billData nếu billId/totalAmount bị undefined
+  const actualBillId = billId || billData?.bill?.id || billData?.id;
+  const actualTotalAmount = totalAmount || billData?.bill?.total || billData?.total || 0;
+  const actualBillCode = billData?.bill?.code || billData?.code;
+  const actualTableName = tableName || billData?.bill?.tableName || billData?.tableName;
 
-  const loadSessionData = async () => {
-    try {
-      setLoading(true);
-      console.log('💳 Loading payment data for session:', sessionId);
-      
-      const response = await sessionService.getById(sessionId);
-      const session = response.data || response;
-      
-      setSessionData(session);
-      
-      // Tính thời gian chơi
-      if (session.startTime) {
-        const startTime = new Date(session.startTime);
-        const currentTime = new Date();
-        const playingMinutes = Math.floor((currentTime - startTime) / (1000 * 60));
-        setPlayingTime(playingMinutes);
-      }
-      
-      console.log('✅ Payment data loaded:', {
-        sessionId,
-        tableName: session.table?.name,
-        totalAmount
-      });
-      
-    } catch (error) {
-      console.error('❌ Error loading payment data:', error);
-      Alert.alert('Lỗi', 'Không thể tải thông tin thanh toán');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // Xử lý thanh toán và tạo bill
+  // Xử lý thanh toán - Chỉ đánh dấu bill đã thanh toán
   const handlePayment = async () => {
     try {
       setProcessing(true);
       
-      if (!sessionData) {
-        Alert.alert('Lỗi', 'Không có thông tin session để thanh toán');
+      // Kiểm tra có billId
+      if (!actualBillId) {
+        Alert.alert('Lỗi', 'Không tìm thấy thông tin hóa đơn để thanh toán');
         return;
       }
 
       // Kiểm tra tiền khách trả
       const paidAmount = Number(customerCash || 0);
-      if (paidAmount < needToPay) {
-        Alert.alert('Lỗi', 'Số tiền khách trả không đủ');
+      if (paidAmount < actualTotalAmount) {
+        Alert.alert('Lỗi', `Số tiền khách trả không đủ. Cần: ${currency(actualTotalAmount)}`);
         return;
       }
 
-      console.log('💳 Processing payment for session:', sessionId);
-
-      // Tạo bill từ session data
-      const paymentData = {
-        tableName: tableName,
-        paymentMethod: paidBy === 'Tiền mặt' ? 'cash' : 'card',
-        ratePerHour: sessionData.pricingSnapshot?.ratePerHour || 40000,
-        totalAmount: needToPay,
-        paidAmount: paidAmount,
-        changeAmount: Math.max(change, 0)
-      };
-
-      const newBill = await createBillFromSession(sessionData, paymentData);
-      
-      console.log('✅ Bill created successfully:', newBill);
-
-      // Chuyển tới màn thành công
-      navigation.navigate("ThanhToanSuccess", {
-        sessionId: sessionId,
-        billId: newBill._id || newBill.id,
-        tableName: tableName || sessionData?.table?.name,
-        area: "Khu vực 1 - 10",
-        need: needToPay,
-        paid: paidAmount,
-        change: Math.max(change, 0),
-        billCode: newBill.code
+      // Đánh dấu bill đã thanh toán qua API
+      const payResponse = await api.patch(`/bills/${actualBillId}/pay`, {
+        paymentMethod: paidBy === 'Tiền mặt' ? 'cash' : 'card'
       });
 
+      // Chuẩn bị params cho success screen
+      const successParams = {
+        sessionId: sessionId,
+        billId: actualBillId,
+        tableName: actualTableName,
+        area: "Khu vực 1",
+        need: actualTotalAmount,
+        paid: paidAmount,
+        change: Math.max(paidAmount - actualTotalAmount, 0),
+        billCode: actualBillCode || payResponse.data?.code || actualBillId
+      };
+
+      // Chuyển tới màn thành công
+      navigation.replace("ThanhToanSuccess", successParams);
+
     } catch (error) {
-      console.error('❌ Payment error:', error);
-      Alert.alert(
-        'Lỗi thanh toán', 
-        error.response?.data?.message || error.message || 'Không thể xử lý thanh toán'
-      );
+      let errorMessage = 'Không thể xử lý thanh toán';
+      if (error.response?.status === 400) {
+        errorMessage = 'Thông tin thanh toán không hợp lệ';
+      } else if (error.response?.status === 404) {
+        errorMessage = 'Không tìm thấy hóa đơn';
+      } else if (error.response?.data?.message) {
+        errorMessage = error.response.data.message;
+      }
+      
+      Alert.alert('Lỗi thanh toán', errorMessage);
     } finally {
       setProcessing(false);
     }
   };
 
   // Tính toán các giá trị
-  const subtotal = totalAmount || 0;
+  const subtotal = actualTotalAmount;
   const needToPay = subtotal;
   const change = useMemo(
     () => Number(customerCash || 0) - needToPay,
@@ -133,38 +92,33 @@ export default function ThanhToanScreen({ navigation, route }) {
 
   // Format thời gian
   const formatTime = () => {
-    if (!sessionData?.startTime) return "Chưa bắt đầu";
+    const createdAt = billData?.bill?.createdAt || billData?.createdAt;
+    if (!createdAt) return "Không xác định";
     
-    const startTime = new Date(sessionData.startTime);
-    return startTime.toLocaleString('vi-VN', {
-      hour: '2-digit',
-      minute: '2-digit',
-      day: '2-digit',
-      month: '2-digit',
-      year: 'numeric'
-    });
+    try {
+      return new Date(createdAt).toLocaleString('vi-VN', {
+        hour: '2-digit',
+        minute: '2-digit',
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric'
+      });
+    } catch (error) {
+      return "Không xác định";
+    }
   };
 
-  // Loading state
-  if (loading) {
-    return (
-      <SafeAreaView style={styles.safe}>
-        <StatusBar barStyle="dark-content" />
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#1677FF" />
-          <Text style={styles.loadingText}>Đang tải thông tin thanh toán...</Text>
-        </View>
-      </SafeAreaView>
-    );
-  }
-
-  // Error state
-  if (!sessionData && !totalAmount) {
+  // Validation - kiểm tra thông tin cần thiết
+  if (!actualBillId || !actualTotalAmount) {
     return (
       <SafeAreaView style={styles.safe}>
         <StatusBar barStyle="dark-content" />
         <View style={styles.errorContainer}>
-          <Text style={styles.errorText}>Không tìm thấy thông tin thanh toán</Text>
+          <FontAwesome5 name="exclamation-triangle" size={48} color="#f59e0b" />
+          <Text style={styles.errorText}>
+            Thông tin thanh toán không đầy đủ.{'\n'}
+            Vui lòng quay lại màn hình đơn hàng và thử lại.
+          </Text>
           <TouchableOpacity 
             style={styles.backBtn} 
             onPress={() => navigation.goBack()}
@@ -191,11 +145,10 @@ export default function ThanhToanScreen({ navigation, route }) {
       <ScrollView contentContainerStyle={styles.container}>
         {/* Thông tin hoá đơn */}
         <Section title="Thông tin hoá đơn" icon={<FontAwesome5 name="receipt" size={16} color="#111827" />}>
-          <Row left="Dùng tại bàn" right={tableName || sessionData?.table?.name || "Không xác định"} />
-          <Row left="Thời gian bắt đầu" right={formatTime()} />
-          {playingTime > 0 && (
-            <Row left="Thời gian chơi" right={`${Math.floor(playingTime / 60)}h${playingTime % 60}m`} />
-          )}
+          <Row left="Dùng tại bàn" right={actualTableName || "Không xác định"} />
+          <Row left="Mã hóa đơn" right={actualBillCode || actualBillId || "Đang tạo..."} />
+          <Row left="Thời gian tạo" right={formatTime()} />
+          <Row left="Trạng thái" right="Chờ thanh toán" />
         </Section>
 
         {/* Thông tin khách hàng */}
@@ -208,7 +161,7 @@ export default function ThanhToanScreen({ navigation, route }) {
 
         {/* Thông tin thanh toán */}
         <Section title="Thông tin thanh toán" icon={<Ionicons name="cash-outline" size={18} color="#111827" />}>
-          <Row left={`Tổng tạm tính`} right={currency(subtotal)} />
+          <Row left={`Tổng hóa đơn`} right={currency(subtotal)} />
 
           {/* Cần thanh toán */}
           <View style={styles.needPayBox}>
@@ -307,17 +260,6 @@ const styles = StyleSheet.create({
   headerTitle: { flex: 1, textAlign: "center", fontSize: 18, fontWeight: "700", color: "#111827" },
   container: { padding: 12, paddingBottom: 0 },
   
-  // Loading & Error states
-  loadingContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  loadingText: {
-    marginTop: 10,
-    fontSize: 16,
-    color: '#666',
-  },
   errorContainer: {
     flex: 1,
     justifyContent: 'center',
@@ -328,11 +270,16 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: '#666',
     textAlign: 'center',
-    marginBottom: 20,
+    marginVertical: 20,
+    lineHeight: 24,
   },
   backBtnText: {
     color: '#1677FF',
     fontWeight: '600',
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    borderRadius: 8,
+    backgroundColor: '#f0f9ff',
   },
   
   section: { backgroundColor: "#fff", borderRadius: 12, marginBottom: 12, borderWidth: 1, borderColor: "#E5E7EB", overflow: "hidden" },
@@ -342,8 +289,8 @@ const styles = StyleSheet.create({
   sectionTitle: { fontSize: 15, fontWeight: "700", color: "#111827" },
   sectionBody: { padding: 12 },
   row: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingVertical: 8 },
-  rowLeft: { color: "#374151", fontSize: 14 },
-  rowRight: { color: "#111827", fontSize: 14, fontWeight: "700" },
+  rowLeft: { color: "#374151", fontSize: 14, flex: 1 },
+  rowRight: { color: "#111827", fontSize: 14, fontWeight: "700", textAlign: "right" },
   inputLike: { height: 44, borderWidth: 1, borderColor: "#E5E7EB", borderRadius: 10, paddingHorizontal: 12, alignItems: "center", flexDirection: "row", justifyContent: "space-between" },
   muted: { color: "#6B7280", fontSize: 14 },
   needPayBox: { marginTop: 6, marginBottom: 10, borderWidth: 1, borderColor: "#E5E7EB", borderRadius: 10, paddingHorizontal: 12, paddingVertical: 12, backgroundColor: "#F9FAFB" },
@@ -360,7 +307,6 @@ const styles = StyleSheet.create({
   quickBtnDisabled: { opacity: 0.5 },
   quickText: { fontWeight: "700", color: "#111827" },
   
-  // Button states
   primaryBtn: { marginTop: 4, backgroundColor: "#1677FF", paddingVertical: 14, borderRadius: 10, alignItems: "center", justifyContent: "center" },
   primaryBtnDisabled: { opacity: 0.6 },
   primaryText: { color: "#fff", fontWeight: "800", fontSize: 16, letterSpacing: 0.2 },
