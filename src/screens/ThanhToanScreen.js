@@ -2,10 +2,11 @@
 import React, { useState, useMemo } from "react";
 import {
   SafeAreaView, StatusBar, View, Text, TouchableOpacity,
-  ScrollView, TextInput, StyleSheet, ActivityIndicator, Alert
+  ScrollView, TextInput, StyleSheet, ActivityIndicator, Alert, Modal
 } from "react-native";
 import { Ionicons, FontAwesome5 } from "@expo/vector-icons";
 import api from '../services/api';
+import { sessionService } from '../services/sessionService';
 
 const currency = (n = 0) =>
   (Number(n) || 0).toLocaleString("vi-VN", {
@@ -13,58 +14,124 @@ const currency = (n = 0) =>
   });
 
 export default function ThanhToanScreen({ navigation, route }) {
-  const [paidBy] = useState("Tiền mặt");
+  const [paidBy, setPaidBy] = useState("Tiền mặt");
   const [customerCash, setCustomerCash] = useState("");
   const [processing, setProcessing] = useState(false);
+  const [showPaymentModal, setShowPaymentModal] = useState(false);
 
-  // Lấy params từ OrderDetail
-  const { sessionId, billId, tableName, totalAmount, billData } = route?.params || {};
+  // Danh sách phương thức thanh toán
+  const paymentMethods = [
+    { key: 'cash', label: 'Tiền mặt', icon: 'cash' },
+    { key: 'transfer', label: 'Chuyển khoản', icon: 'card' },
+    { key: 'card', label: 'Thẻ', icon: 'card-outline' }
+  ];
 
-  // Lấy bill info từ billData nếu billId/totalAmount bị undefined
-  const actualBillId = billId || billData?.bill?.id || billData?.id;
-  const actualTotalAmount = totalAmount || billData?.bill?.total || billData?.total || 0;
-  const actualBillCode = billData?.bill?.code || billData?.code;
-  const actualTableName = tableName || billData?.bill?.tableName || billData?.tableName;
+  // Lấy params từ navigation - hỗ trợ cả OrderDetail và PaymentScreen
+  const { 
+    // Từ OrderDetail (tạo bill mới)
+    sessionId, 
+    tableName, 
+    tableId,
+    totalAmount, 
+    playingTime, 
+    ratePerHour, 
+    sessionData,
+    
+    // Từ PaymentScreen (bill có sẵn) 
+    billId,
+    billData,
+    isExistingBill,
+    billCode,
+    playAmount,
+    serviceAmount,
+    subTotal,
+    paymentMethod
+  } = route?.params || {};
 
-  // Xử lý thanh toán - Chỉ đánh dấu bill đã thanh toán
+  // Sử dụng thông tin phù hợp
+  const actualTotalAmount = totalAmount || 0;
+  const actualTableName = tableName || "Không xác định";
+  const actualBillCode = billCode || billId || sessionId;
+
+  // Chuyển đổi label sang key cho API
+  const getPaymentMethodKey = (label) => {
+    const method = paymentMethods.find(m => m.label === label);
+    return method ? method.key : 'cash';
+  };
+
+  // Kiểm tra xem có phải phương thức tiền mặt không
+  const isCashPayment = paidBy === "Tiền mặt";
+
+  // Xử lý thanh toán
   const handlePayment = async () => {
     try {
       setProcessing(true);
       
-      // Kiểm tra có billId
-      if (!actualBillId) {
-        Alert.alert('Lỗi', 'Không tìm thấy thông tin hóa đơn để thanh toán');
+      // Kiểm tra thông tin cần thiết
+      if (!actualTotalAmount) {
+        Alert.alert('Lỗi', 'Không tìm thấy thông tin số tiền thanh toán');
         return;
       }
 
-      // Kiểm tra tiền khách trả
-      const paidAmount = Number(customerCash || 0);
-      if (paidAmount < actualTotalAmount) {
-        Alert.alert('Lỗi', `Số tiền khách trả không đủ. Cần: ${currency(actualTotalAmount)}`);
-        return;
+      let paidAmount = actualTotalAmount; // Mặc định bằng tổng hóa đơn
+
+      // Chỉ kiểm tra tiền khách trả nếu là thanh toán tiền mặt
+      if (isCashPayment) {
+        paidAmount = Number(customerCash || 0);
+        if (paidAmount < actualTotalAmount) {
+          Alert.alert('Lỗi', `Số tiền khách trả không đủ. Cần: ${currency(actualTotalAmount)}`);
+          return;
+        }
       }
 
-      // Đánh dấu bill đã thanh toán qua API
-      const payResponse = await api.patch(`/bills/${actualBillId}/pay`, {
-        paymentMethod: paidBy === 'Tiền mặt' ? 'cash' : 'card'
-      });
+      let finalBillId;
+      let finalBillCode;
+      const methodKey = getPaymentMethodKey(paidBy);
+
+      if (isExistingBill && billId) {
+        // Case 1: Thanh toán bill có sẵn từ PaymentScreen
+        await api.patch(`/bills/${billId}/pay`, {
+          paymentMethod: methodKey
+        });
+        
+        finalBillId = billId;
+        finalBillCode = billCode || billId;
+        
+      } else if (sessionId) {
+        // Case 2: Tạo bill mới từ session (OrderDetail)
+        const checkoutResponse = await sessionService.checkout(sessionId, {
+          endAt: new Date(),
+          paymentMethod: methodKey,
+          paid: true,
+          note: 'Thanh toán trực tiếp'
+        });
+
+        const createdBill = checkoutResponse.data || checkoutResponse;
+        finalBillId = createdBill._id || createdBill.id;
+        finalBillCode = createdBill.code || finalBillId;
+        
+      } else {
+        Alert.alert('Lỗi', 'Không có thông tin hóa đơn để thanh toán');
+        return;
+      }
 
       // Chuẩn bị params cho success screen
       const successParams = {
-        sessionId: sessionId,
-        billId: actualBillId,
+        sessionId: sessionId || 'completed',
+        billId: finalBillId,
         tableName: actualTableName,
         area: "Khu vực 1",
         need: actualTotalAmount,
         paid: paidAmount,
         change: Math.max(paidAmount - actualTotalAmount, 0),
-        billCode: actualBillCode || payResponse.data?.code || actualBillId
+        billCode: finalBillCode
       };
 
       // Chuyển tới màn thành công
       navigation.replace("ThanhToanSuccess", successParams);
 
     } catch (error) {
+      console.error('❌ Payment error:', error);
       let errorMessage = 'Không thể xử lý thanh toán';
       if (error.response?.status === 400) {
         errorMessage = 'Thông tin thanh toán không hợp lệ';
@@ -84,32 +151,79 @@ export default function ThanhToanScreen({ navigation, route }) {
   const subtotal = actualTotalAmount;
   const needToPay = subtotal;
   const change = useMemo(
-    () => Number(customerCash || 0) - needToPay,
-    [customerCash, needToPay]
+    () => isCashPayment ? Math.max(Number(customerCash || 0) - needToPay, 0) : 0,
+    [customerCash, needToPay, isCashPayment]
   );
 
   const quicks = [0, needToPay, Math.ceil(needToPay / 100000) * 100000];
 
-  // Format thời gian
+  // Format thời gian hiện tại
   const formatTime = () => {
-    const createdAt = billData?.bill?.createdAt || billData?.createdAt;
-    if (!createdAt) return "Không xác định";
-    
-    try {
-      return new Date(createdAt).toLocaleString('vi-VN', {
-        hour: '2-digit',
-        minute: '2-digit',
-        day: '2-digit',
-        month: '2-digit',
-        year: 'numeric'
-      });
-    } catch (error) {
-      return "Không xác định";
-    }
+    return new Date().toLocaleString('vi-VN', {
+      hour: '2-digit',
+      minute: '2-digit',
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric'
+    });
   };
 
-  // Validation - kiểm tra thông tin cần thiết
-  if (!actualBillId || !actualTotalAmount) {
+  // Modal chọn phương thức thanh toán
+  const PaymentMethodModal = () => (
+    <Modal
+      visible={showPaymentModal}
+      transparent={true}
+      animationType="slide"
+      onRequestClose={() => setShowPaymentModal(false)}
+    >
+      <View style={styles.modalOverlay}>
+        <View style={styles.modalContainer}>
+          {/* Header */}
+          <View style={styles.modalHeader}>
+            <Text style={styles.modalTitle}>Phương thức thanh toán</Text>
+            <TouchableOpacity 
+              onPress={() => setShowPaymentModal(false)}
+              style={styles.closeButton}
+            >
+              <Ionicons name="close" size={24} color="#666" />
+            </TouchableOpacity>
+          </View>
+
+          {/* Danh sách phương thức */}
+          <View style={styles.methodsList}>
+            {paymentMethods.map((method) => (
+              <TouchableOpacity
+                key={method.key}
+                style={styles.methodItem}
+                onPress={() => {
+                  setPaidBy(method.label);
+                  setShowPaymentModal(false);
+                }}
+              >
+                <View style={styles.methodLeft}>
+                  <View style={styles.methodIcon}>
+                    <Ionicons name={method.icon} size={24} color="#007AFF" />
+                  </View>
+                  <Text style={styles.methodLabel}>{method.label}</Text>
+                </View>
+                <View style={[
+                  styles.radioButton,
+                  paidBy === method.label && styles.radioButtonSelected
+                ]}>
+                  {paidBy === method.label && (
+                    <View style={styles.radioButtonInner} />
+                  )}
+                </View>
+              </TouchableOpacity>
+            ))}
+          </View>
+        </View>
+      </View>
+    </Modal>
+  );
+
+  // Validation - chỉ kiểm tra totalAmount
+  if (!actualTotalAmount) {
     return (
       <SafeAreaView style={styles.safe}>
         <StatusBar barStyle="dark-content" />
@@ -117,7 +231,7 @@ export default function ThanhToanScreen({ navigation, route }) {
           <FontAwesome5 name="exclamation-triangle" size={48} color="#f59e0b" />
           <Text style={styles.errorText}>
             Thông tin thanh toán không đầy đủ.{'\n'}
-            Vui lòng quay lại màn hình đơn hàng và thử lại.
+            Vui lòng quay lại và thử lại.
           </Text>
           <TouchableOpacity 
             style={styles.backBtn} 
@@ -145,10 +259,10 @@ export default function ThanhToanScreen({ navigation, route }) {
       <ScrollView contentContainerStyle={styles.container}>
         {/* Thông tin hoá đơn */}
         <Section title="Thông tin hoá đơn" icon={<FontAwesome5 name="receipt" size={16} color="#111827" />}>
-          <Row left="Dùng tại bàn" right={actualTableName || "Không xác định"} />
-          <Row left="Mã hóa đơn" right={actualBillCode || actualBillId || "Đang tạo..."} />
+          <Row left="Dùng tại bàn" right={actualTableName} />
+          <Row left={isExistingBill ? "Mã hóa đơn" : "Mã phiên"} right={actualBillCode || "Đang tạo..."} />
           <Row left="Thời gian tạo" right={formatTime()} />
-          <Row left="Trạng thái" right="Chờ thanh toán" />
+          <Row left="Trạng thái" right={isExistingBill ? "Chờ thanh toán" : "Đang tạo hóa đơn"} />
         </Section>
 
         {/* Thông tin khách hàng */}
@@ -172,44 +286,62 @@ export default function ThanhToanScreen({ navigation, route }) {
           {/* PT thanh toán */}
           <View style={styles.inline}>
             <Text style={styles.label}>PT thanh toán</Text>
-            <View style={styles.methodBtn}>
+            <TouchableOpacity 
+              style={styles.methodBtn}
+              onPress={() => setShowPaymentModal(true)}
+            >
               <Text style={styles.methodText}>{paidBy}</Text>
               <Ionicons name="chevron-forward" size={18} color="#3b82f6" />
+            </TouchableOpacity>
+          </View>
+
+          {/* Chỉ hiển thị phần nhập tiền khách trả khi chọn Tiền mặt */}
+          {isCashPayment && (
+            <>
+              {/* Nhập tiền khách trả */}
+              <View style={styles.inline}>
+                <Text style={styles.label}>Nhập tiền khách trả</Text>
+                <View style={styles.amountInputWrap}>
+                  <TextInput
+                    value={customerCash}
+                    onChangeText={setCustomerCash}
+                    placeholder="0đ"
+                    placeholderTextColor="#9CA3AF"
+                    keyboardType="numeric"
+                    style={styles.amountInput}
+                    editable={!processing}
+                  />
+                </View>
+              </View>
+
+              {/* Tiền thừa */}
+              <Row left="Tiền thừa" right={currency(change)} />
+
+              {/* Quick amounts */}
+              <View style={styles.quickWrap}>
+                {quicks.map((q, index) => (
+                  <TouchableOpacity 
+                    key={index} 
+                    style={[styles.quickBtn, processing && styles.quickBtnDisabled]}
+                    onPress={() => setCustomerCash(String(q))}
+                    disabled={processing}
+                  >
+                    <Text style={styles.quickText}>{currency(q)}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </>
+          )}
+
+          {/* Hiển thị thông báo cho phương thức không phải tiền mặt */}
+          {!isCashPayment && (
+            <View style={styles.nonCashInfo}>
+              <Ionicons name="information-circle-outline" size={20} color="#007AFF" />
+              <Text style={styles.nonCashText}>
+                Thanh toán bằng {paidBy.toLowerCase()} - Số tiền: {currency(needToPay)}
+              </Text>
             </View>
-          </View>
-
-          {/* Nhập tiền khách trả */}
-          <View style={styles.inline}>
-            <Text style={styles.label}>Nhập tiền khách trả</Text>
-            <View style={styles.amountInputWrap}>
-              <TextInput
-                value={customerCash}
-                onChangeText={setCustomerCash}
-                placeholder="0đ"
-                placeholderTextColor="#9CA3AF"
-                keyboardType="numeric"
-                style={styles.amountInput}
-                editable={!processing}
-              />
-            </View>
-          </View>
-
-          {/* Tiền thừa */}
-          <Row left="Tiền thừa" right={currency(Math.max(change, 0))} />
-
-          {/* Quick amounts */}
-          <View style={styles.quickWrap}>
-            {quicks.map((q, index) => (
-              <TouchableOpacity 
-                key={index} 
-                style={[styles.quickBtn, processing && styles.quickBtnDisabled]}
-                onPress={() => setCustomerCash(String(q))}
-                disabled={processing}
-              >
-                <Text style={styles.quickText}>{currency(q)}</Text>
-              </TouchableOpacity>
-            ))}
-          </View>
+          )}
         </Section>
 
         {/* Nút xác nhận */}
@@ -230,6 +362,9 @@ export default function ThanhToanScreen({ navigation, route }) {
 
         <View style={{ height: 24 }} />
       </ScrollView>
+
+      {/* Modal chọn phương thức thanh toán */}
+      <PaymentMethodModal />
     </SafeAreaView>
   );
 }
@@ -313,5 +448,130 @@ const styles = StyleSheet.create({
   processingContainer: {
     flexDirection: 'row',
     alignItems: 'center',
+  },
+
+  // Modal styles
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'flex-end',
+  },
+  modalContainer: {
+    backgroundColor: '#fff',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    paddingBottom: 30,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
+    paddingVertical: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f0f0f0',
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#111827',
+  },
+  closeButton: {
+    padding: 4,
+  },
+
+  toggleContainer: {
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f0f0f0',
+  },
+  toggleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  toggleLabel: {
+    fontSize: 16,
+    color: '#111827',
+  },
+  toggleSwitch: {
+    width: 50,
+    height: 30,
+    borderRadius: 15,
+    backgroundColor: '#e0e0e0',
+    justifyContent: 'center',
+    paddingHorizontal: 2,
+  },
+  toggleInactive: {
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    backgroundColor: '#fff',
+  },
+
+  methodsList: {
+    paddingHorizontal: 20,
+    paddingTop: 10,
+  },
+  methodItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 16,
+  },
+  methodLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+  methodIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 8,
+    backgroundColor: '#f0f9ff',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 12,
+  },
+  methodLabel: {
+    fontSize: 16,
+    color: '#111827',
+    fontWeight: '500',
+  },
+  radioButton: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    borderWidth: 2,
+    borderColor: '#d1d5db',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  radioButtonSelected: {
+    borderColor: '#007AFF',
+  },
+  radioButtonInner: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    backgroundColor: '#007AFF',
+  },
+
+  // Thêm styles mới cho thông báo non-cash
+  nonCashInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#f0f9ff',
+    borderRadius: 8,
+    padding: 12,
+    marginTop: 12,
+  },
+  nonCashText: {
+    fontSize: 14,
+    color: '#1d4ed8',
+    marginLeft: 8,
+    fontWeight: '500',
+    flex: 1,
   },
 });

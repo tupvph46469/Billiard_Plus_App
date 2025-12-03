@@ -158,35 +158,76 @@ export default function OrderDetail({ navigation, route }) {
     }
   }, [loadSessionData, navigation]);
 
-  // Function handlePayment - TẠO BILL VÀ CHUYỂN SANG THANH TOÁN
+  // Function handlePayment - CHUYỂN SANG THANH TOÁN (không dùng API checkout)
   const handlePayment = useCallback(async () => {
     try {
-      console.log('💳 Creating bill for payment...');
+      console.log('💳 Navigating to payment screen...');
       
-      // Tạo bill từ session với trạng thái chưa thanh toán
+      // Chuyển sang màn thanh toán với thông tin session
+      navigation.navigate('ThanhToan', {
+        sessionId: sessionId,
+        tableName: tableName,
+        tableId: tableId,
+        totalAmount: getTotalAmount(),
+        playingTime: playingTime,
+        ratePerHour: ratePerHour || sessionData?.pricingSnapshot?.ratePerHour || 40000,
+        sessionData: sessionData
+      });
+      
+    } catch (error) {
+      console.error('❌ Error navigating to payment:', error);
+      showToast('❌ Không thể chuyển đến màn thanh toán', 'error');
+    }
+  }, [sessionId, tableName, tableId, getTotalAmount, playingTime, ratePerHour, sessionData, navigation]);
+
+  // Function handleMenuAction - XỬ LÝ CÁC ACTION TRONG MENU
+  const handleMenuAction = useCallback(async (action) => {
+    setShowMenu(false); // Đóng menu trước
+    
+    switch (action) {
+      case 'Yêu cầu thanh toán':
+        await handleCheckoutPayment();
+        break;
+      // Có thể thêm các case khác sau
+      default:
+        showToast('Chức năng đang phát triển', 'info');
+        break;
+    }
+  }, []);
+
+  // Function handleCheckoutPayment - SỬ DỤNG API CHECKOUT VÀ CHUYỂN TỚI PAYMENT SCREEN
+  const handleCheckoutPayment = useCallback(async () => {
+    try {
+      console.log('💳 Creating bill via checkout API...');
+      
+      if (!sessionId) {
+        showToast('❌ Không tìm thấy thông tin phiên chơi', 'error');
+        return;
+      }
+      
+      // Hiển thị loading
+      setSaving(true);
+      
+      // Gọi API checkout để tạo bill và đóng session
       const checkoutResponse = await sessionService.checkout(sessionId, {
         endAt: new Date(),
         paymentMethod: 'cash', // Mặc định tiền mặt
         paid: false, // Chưa thanh toán, chỉ tạo bill
-        note: 'Tạo hóa đơn cho thanh toán'
+        note: 'Yêu cầu thanh toán từ menu'
       });
       
-      console.log('✅ Bill created:', checkoutResponse);
+      console.log('✅ Bill created via checkout:', checkoutResponse);
       
-      // Lấy thông tin bill từ response
-      const billData = checkoutResponse.data || checkoutResponse;
+      showToast('✅ Tạo hóa đơn thành công');
       
-      // Chuyển sang màn thanh toán với thông tin bill
-      navigation.navigate('ThanhToan', {
-        sessionId: sessionId,
-        billId: billData._id || billData.id,
-        tableName: tableName,
-        totalAmount: getTotalAmount(),
-        billData: billData
+      // Chuyển tới Main tab với Payment screen
+      navigation.navigate('Main', {
+        screen: 'Payment',
+        params: { refreshData: true }
       });
       
     } catch (error) {
-      console.error('❌ Error creating bill:', error);
+      console.error('❌ Error creating bill via checkout:', error);
       
       let errorMessage = 'Không thể tạo hóa đơn';
       if (error.response?.status === 400) {
@@ -198,8 +239,10 @@ export default function OrderDetail({ navigation, route }) {
       }
       
       showToast(`❌ ${errorMessage}`, 'error');
+    } finally {
+      setSaving(false);
     }
-  }, [sessionId, tableName, getTotalAmount, navigation]);
+  }, [sessionId, navigation]);
 
   // Load session data và area info khi component mount
   useEffect(() => {
@@ -583,7 +626,12 @@ export default function OrderDetail({ navigation, route }) {
               'Thay đổi bàn',
               'Khách hàng',
             ].map((item, index) => (
-              <TouchableOpacity key={index} style={styles.menuItem}>
+              <TouchableOpacity 
+                key={index} 
+                style={styles.menuItem}
+                onPress={() => handleMenuAction(item)}
+                disabled={saving}
+              >
                 <Text style={styles.menuText}>{item}</Text>
               </TouchableOpacity>
             ))}
