@@ -82,17 +82,70 @@ const Row = ({ left, right }) => (
 );
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#fff" },                // <- FULL màn
-  banner: { height: 120, backgroundColor: "#eef0ff" },            // dải màu trên
-  content: { flex: 1, padding: 20, alignItems: "center" },
-  title: { textAlign: "center", fontSize: 18, fontWeight: "800", color: "#0f1a40", marginTop: 10 },
-  area: { textAlign: "center", fontSize: 20, fontWeight: "700", marginTop: 4 },
-  row: { flexDirection: "row", justifyContent: "space-between", width: "100%" },
-  rowLeft: { fontSize: 18, fontWeight: "600" },
-  rowRight: { fontSize: 18, fontWeight: "700" },
-  checkboxRow: { flexDirection: "row", alignItems: "center", marginTop: 18 },
-  note: { color: "#111827", textAlign: "center", marginTop: 6 },
-  link: { color: "#0ea5e9", fontWeight: "700" },
-  primaryBtn: { backgroundColor: "#1677FF", borderRadius: 10, paddingVertical: 14, alignItems: "center", width: "100%", marginTop: 16 },
-  primaryText: { color: "#fff", fontSize: 16, fontWeight: "800" },
+  container: {
+    flex: 1,
+    backgroundColor: "#fff"
+  },
+  banner: {
+    height: 120,
+    backgroundColor: "#eef0ff"
+  },
+  content: {
+    flex: 1,
+    padding: 20,
+    alignItems: "center"
+  },
+  title: {
+    textAlign: "center",
+    fontSize: 18,
+    fontWeight: "800",
+    color: "#0f1a40",
+    marginTop: 10
+  },
+  area: {
+    textAlign: "center",
+    fontSize: 20,
+    fontWeight: "700",
+    marginTop: 4
+  },
+  row: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    width: "100%"
+  },
+  rowLeft: {
+    fontSize: 18,
+    fontWeight: "600"
+  },
+  rowRight: {
+    fontSize: 18,
+    fontWeight: "700"
+  },
+  checkboxRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginTop: 18
+  },
+  note: {
+    color: "#111827",
+    textAlign: "center",
+    marginTop: 6
+  },
+  link: {
+    color: "#0ea5e9",
+    fontWeight: "700"
+  },
+  primaryBtn: {
+    backgroundColor: "#1677FF",
+    borderRadius: 10,
+    paddingVertical: 14,
+    alignItems: "center",
+    width: "100%",
+    marginTop: 16
+  },
+  primaryText: {
+    color: "#fff",
+    fontSize: 16,
+    fontWeight: "800"
+  },
 });
