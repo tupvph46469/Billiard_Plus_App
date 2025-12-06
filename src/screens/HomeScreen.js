@@ -224,65 +224,69 @@ export default function HomeScreen({ navigation }) {
     });
   };
 
-  const renderPlayingTable = (table, index) => {
-    if (!table || !table._id) return null;
 
-    const info = calculateSessionInfo(table._id);
-    if (!info) return null;
+const renderPlayingTable = (table, index) => {
+  if (!table || !table._id) return null;
 
-    const areaName = getAreaName(table.areaId);
-    const areaColor = getAreaColor(table.areaId);
-    const key = table._id || `table-${table.name}-${index}`;
+  const info = calculateSessionInfo(table._id);
+  if (!info) return null;
 
-    return (
-      <TouchableOpacity
-        key={key}
-        style={[styles.tableCard, { borderLeftColor: areaColor }]}
-        onPress={() => {
-          navigation.navigate("OrderDetail", {
-            session: info.session,
-            table,
-          });
-        }}
-      >
-        {/* Header với khu vực */}
-        <View style={styles.tableHeader}>
-          <View style={styles.tableNameSection}>
-            <Text style={styles.areaLabel} numberOfLines={1}>
-              {areaName}
-            </Text>
-            <Text style={styles.tableName}>{table.name || "Bàn"}</Text>
-          </View>
+  const areaName = getAreaName(table.areaId);
+  const areaColor = getAreaColor(table.areaId);
+  const key = table._id || `table-${table.name}-${index}`;
 
-          <View style={[styles.statusBadge, { backgroundColor: "#e8f8f3" }]}>
-            <View style={[styles.statusDot, { backgroundColor: "#00d68f" }]} />
-            <Text style={[styles.statusText, { color: "#00d68f" }]}>
-              Đang chơi
-            </Text>
-          </View>
+  return (
+    <TouchableOpacity
+      key={key}
+      style={[styles.tableCard, { borderLeftColor: areaColor }]}
+      onPress={() => {
+        // ✅ FIX: Truyền đúng params mà OrderDetail expect
+        navigation.navigate("OrderDetail", {
+          sessionId: info.session._id || info.session.id,
+          tableName: table.name,
+          tableId: table._id,
+          ratePerHour: table.ratePerHour || 40000,
+        });
+      }}
+    >
+      {/* Header với khu vực */}
+      <View style={styles.tableHeader}>
+        <View style={styles.tableNameSection}>
+          <Text style={styles.areaLabel} numberOfLines={1}>
+            {areaName}
+          </Text>
+          <Text style={styles.tableName}>{table.name || "Bàn"}</Text>
         </View>
 
-        {/* Thông tin session */}
-        <View style={styles.sessionInfo}>
-          <View style={styles.infoRow}>
-            <Ionicons name="time-outline" size={18} color="#666" />
-            <Text style={styles.infoText}>{info.formatted}</Text>
-          </View>
+        <View style={[styles.statusBadge, { backgroundColor: "#e8f8f3" }]}>
+          <View style={[styles.statusDot, { backgroundColor: "#00d68f" }]} />
+          <Text style={[styles.statusText, { color: "#00d68f" }]}>
+            Đang chơi
+          </Text>
+        </View>
+      </View>
 
-          <View style={styles.infoRow}>
-            <Ionicons name="cash-outline" size={18} color="#666" />
-            <Text style={styles.infoText}>{formatMoney(info.money)}</Text>
-          </View>
+      {/* Thông tin session */}
+      <View style={styles.sessionInfo}>
+        <View style={styles.infoRow}>
+          <Ionicons name="time-outline" size={18} color="#666" />
+          <Text style={styles.infoText}>{info.formatted}</Text>
         </View>
 
-        {/* Footer - Tiện theo giờ */}
-        <View style={styles.footer}>
-          <Ionicons name="timer-outline" size={14} color="#999" />
-          <Text style={styles.footerText}>Tiện theo giờ</Text>
+        <View style={styles.infoRow}>
+          <Ionicons name="cash-outline" size={18} color="#666" />
+          <Text style={styles.infoText}>{formatMoney(info.money)}</Text>
         </View>
-      </TouchableOpacity>
-    );
-  };
+      </View>
+
+      {/* Footer - Tiền theo giờ */}
+      <View style={styles.footer}>
+        <Ionicons name="timer-outline" size={14} color="#999" />
+        <Text style={styles.footerText}>Tiền theo giờ</Text>
+      </View>
+    </TouchableOpacity>
+  );
+};
 
   if (loading) {
     return (

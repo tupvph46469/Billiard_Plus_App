@@ -1,5 +1,4 @@
-// Căn giữa toàn bộ giao diện (đã bỏ nút demo)
-// Bạn thay thế toàn bộ file LoginScreen.js bằng nội dung dưới đây
+
 
 import { authService } from "../services/authService";
 import React, { useState } from "react";
@@ -65,7 +64,7 @@ export default function LoginScreen({ navigation }) {
             style={styles.logo}
             resizeMode="contain"
           />
-          <Text style={styles.title}>Billiard Plus</Text>
+          <Text style={styles.title}>BILLIARDS PLUS</Text>
           <Text style={styles.subtitle}>Quản lý câu lạc bộ bi-a</Text>
         </View>
 
