@@ -261,26 +261,24 @@ export default function PaymentScreen({ navigation }) {
         onClose={() => setMenuVisible(false)}
         navigation={navigation}
       />
+{/* Tab Navigation (centered primary tab with badge) */}
+<View style={styles.tabContainer}>
+  <TouchableOpacity
+    style={[styles.centeredTab, activeTab === 'pending' && styles.centeredTabActive]}
+    onPress={() => setActiveTab('pending')}
+    activeOpacity={0.8}
+  >
+    <Text style={[styles.centeredTabText, activeTab === 'pending' && styles.centeredTabTextActive]}>
+      Chờ thanh toán
+    </Text>
 
-      {/* Tab Navigation */}
-      <View style={styles.tabContainer}>
-        <TouchableOpacity 
-          style={[styles.tab, activeTab === 'pending' && styles.activeTab]}
-          onPress={() => setActiveTab('pending')}
-        >
-          <Text style={[styles.tabText, activeTab === 'pending' && styles.activeTabText]}>
-            Chờ thanh toán ({activeTab === 'pending' ? bills.length : 0})
-          </Text>
-        </TouchableOpacity>
-        <TouchableOpacity 
-          style={[styles.tab, activeTab === 'confirmed' && styles.activeTab]}
-          onPress={() => setActiveTab('confirmed')}
-        >
-          <Text style={[styles.tabText, activeTab === 'confirmed' && styles.activeTabText]}>
-            Chờ xác nhận (0)
-          </Text>
-        </TouchableOpacity>
-      </View>
+    {/* Badge hiển thị số bills (nằm ở cùng hàng, cách một khoảng) */}
+    <View style={styles.tabBadge}>
+      <Text style={styles.tabBadgeText}>{bills.length}</Text>
+    </View>
+  </TouchableOpacity>
+</View>
+
 
       {/* Content */}
       {renderContent()}
@@ -300,30 +298,71 @@ const styles = StyleSheet.create({
     alignItems: "center" 
   },
 
-  tabContainer: {
-    flexDirection: 'row',
-    backgroundColor: '#fff',
-    paddingHorizontal: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: '#e0e0e0',
-  },
-  tab: {
-    flex: 1,
-    paddingVertical: 12,
-    alignItems: 'center',
-  },
-  activeTab: {
-    borderBottomWidth: 2,
-    borderBottomColor: '#007AFF',
-  },
-  tabText: {
-    fontSize: 14,
-    color: '#666',
-  },
-  activeTabText: {
-    color: '#007AFF',
-    fontWeight: '500',
-  },
+  /* Tab - centered style */
+tabContainer: {
+  flexDirection: 'row',
+  justifyContent: 'center',   // quan trọng: căn giữa khu vực tab
+  backgroundColor: '#fff',
+  paddingHorizontal: 16,
+  paddingVertical: 10,
+  borderBottomWidth: 1,
+  borderBottomColor: '#e9eef2',
+  alignItems: 'center',
+},
+
+centeredTab: {
+  flexDirection: 'row',
+  alignItems: 'center',
+  paddingHorizontal: 18,
+  paddingVertical: 8,
+  borderRadius: 22,
+  backgroundColor: 'transparent',
+  // shadow nhẹ để nổi lên
+  elevation: 0,
+},
+
+centeredTabActive: {
+  backgroundColor: '#f0f8ff', // nền nhẹ khi active
+  borderRadius: 24,
+  shadowColor: '#007AFF',
+  shadowOffset: { width: 0, height: 2 },
+  shadowOpacity: 0.06,
+  shadowRadius: 4,
+  elevation: 2,
+},
+
+centeredTabText: {
+  fontSize: 16,
+  color: '#4b5563', // xám đậm
+  fontWeight: '600',
+},
+
+centeredTabTextActive: {
+  color: '#007AFF',
+  fontWeight: '700',
+},
+
+tabBadge: {
+  marginLeft: 10,
+  minWidth: 28,
+  height: 24,
+  paddingHorizontal: 6,
+  borderRadius: 12,
+  backgroundColor: '#007AFF',
+  justifyContent: 'center',
+  alignItems: 'center',
+  shadowColor: '#007AFF',
+  shadowOffset: { width: 0, height: 1 },
+  shadowOpacity: 0.08,
+  shadowRadius: 2,
+  elevation: 2,
+},
+
+tabBadgeText: {
+  color: '#fff',
+  fontSize: 13,
+  fontWeight: '700',
+},
 
   scrollView: {
     flex: 1,

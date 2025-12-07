@@ -3,99 +3,228 @@ import {
   View,
   Text,
   StyleSheet,
-  TouchableOpacity,
+  Pressable,
   Modal,
   Animated,
   Dimensions,
   TouchableWithoutFeedback,
+  FlatList,
+  Platform,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import { SafeAreaView } from "react-native-safe-area-context";
 
-const menuItems = [
-  { id: 1, title: "Quản lý câu lạc bộ", icon: "people", route: "Management" },
-  { id: 2, title: "Quản lý hóa đơn", icon: "receipt", route: "Bills" },
-  { id: 7, title: "Thiết lập ", icon: "settings", route: "Settings" },
-  { id: 8, title: "Đăng xuất", icon: "log-out", route: "Logout" },
+const BASE_DURATION = 220;
+
+const defaultMenuItems = [
+  { id: "management", title: "Quản lý câu lạc bộ", icon: "people", route: "Management" },
+  { id: "bills", title: "Quản lý hóa đơn", icon: "receipt", route: "Bills" },
+  { id: "settings", title: "Thiết lập", icon: "settings", route: "Settings" },
+  { id: "logout", title: "Đăng xuất", icon: "log-out", route: "Logout" },
 ];
 
-export default function Menu({ visible, onClose, navigation }) {
-  const screenWidth = Dimensions.get('window').width;
-  const menuWidth = screenWidth * 0.8;
+export default function Menu({
+  visible,
+  onClose,
+  navigation,
+  items = defaultMenuItems,
+  user = null, // optional: { name, email, role }
+}) {
+  const screenWidth = Dimensions.get("window").width;
+  const menuWidth = Math.min(420, screenWidth * 0.82); // max width for tablets
   const translateX = useRef(new Animated.Value(-menuWidth)).current;
+  const backdropOpacity = useRef(new Animated.Value(0)).current;
   const [showModal, setShowModal] = useState(visible);
 
   useEffect(() => {
     if (visible) {
-      // open: show modal then slide in
       setShowModal(true);
-      Animated.timing(translateX, {
-        toValue: 0,
-        duration: 220,
-        useNativeDriver: true,
-      }).start();
+      Animated.parallel([
+        Animated.timing(translateX, {
+          toValue: 0,
+          duration: BASE_DURATION,
+          useNativeDriver: true,
+        }),
+        Animated.timing(backdropOpacity, {
+          toValue: 1,
+          duration: BASE_DURATION,
+          useNativeDriver: true,
+        }),
+      ]).start();
     } else if (showModal) {
-      // close: slide out then hide modal
-      Animated.timing(translateX, {
-        toValue: -menuWidth,
-        duration: 180,
-        useNativeDriver: true,
-      }).start(() => setShowModal(false));
+      Animated.parallel([
+        Animated.timing(translateX, {
+          toValue: -menuWidth,
+          duration: BASE_DURATION * 0.9,
+          useNativeDriver: true,
+        }),
+        Animated.timing(backdropOpacity, {
+          toValue: 0,
+          duration: BASE_DURATION * 0.9,
+          useNativeDriver: true,
+        }),
+      ]).start(() => setShowModal(false));
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visible]);
 
   const handleClose = () => {
-    Animated.timing(translateX, {
-      toValue: -menuWidth,
-      duration: 180,
-      useNativeDriver: true,
-    }).start(() => {
+    Animated.parallel([
+      Animated.timing(translateX, {
+        toValue: -menuWidth,
+        duration: BASE_DURATION * 0.9,
+        useNativeDriver: true,
+      }),
+      Animated.timing(backdropOpacity, {
+        toValue: 0,
+        duration: BASE_DURATION * 0.9,
+        useNativeDriver: true,
+      }),
+    ]).start(() => {
       setShowModal(false);
       onClose && onClose();
     });
   };
 
+  const onItemPress = (item) => {
+    if (item.route === "Logout") {
+      navigation.reset({
+        index: 0,
+        routes: [{ name: "LoginScreen" }],
+      });
+      handleClose();
+      return;
+    }
+
+    navigation.navigate(item.route);
+    handleClose();
+  };
+
+  const renderProfile = () => {
+    const name = user?.name || "Quản trị viên";
+    const email = user?.email || null;
+    const initials = name
+      .split(" ")
+      .map(p => p[0])
+      .slice(0, 2)
+      .join("")
+      .toUpperCase();
+
+    return (
+      <View style={styles.profileRow}>
+        <View style={styles.avatar}>
+          <Text style={styles.avatarText}>{initials}</Text>
+        </View>
+
+        <View style={styles.profileMeta}>
+          <Text style={styles.profileName} numberOfLines={1}>
+            {name}
+          </Text>
+          {email ? <Text style={styles.profileEmail} numberOfLines={1}>{email}</Text> : null}
+        </View>
+      </View>
+    );
+  };
+
+  const renderItem = ({ item }) => {
+    return (
+      <Pressable
+        onPress={() => onItemPress(item)}
+        android_ripple={{ color: "rgba(0,0,0,0.06)" }}
+        style={({ pressed }) => [
+          styles.menuItem,
+          pressed && styles.menuItemPressed,
+          // scale effect for press
+          {
+            transform: [{ scale: pressed ? 0.985 : 1 }],
+          },
+        ]}
+        accessibilityLabel={item.title}
+        accessibilityRole="button"
+        hitSlop={8}
+      >
+        <View style={styles.iconWrapper}>
+          <Ionicons name={item.icon} size={20} color="#2f3b4a" />
+        </View>
+        <Text style={styles.menuItemText}>{item.title}</Text>
+        <Ionicons name="chevron-forward" size={18} color="#9aa6b2" />
+      </Pressable>
+    );
+  };
+
   return (
-    <Modal transparent={true} visible={showModal} onRequestClose={handleClose}>
-      <View style={styles.modalOverlay}>
+    <Modal
+      transparent
+      visible={showModal}
+      onRequestClose={handleClose}
+      statusBarTranslucent
+      animationType="none"
+    >
+      <Animated.View style={[styles.backdrop, { opacity: backdropOpacity }]} />
+      <View style={styles.container}>
         <Animated.View
-          style={[styles.menuContainer, { width: menuWidth, transform: [{ translateX }] }]}
+          style={[
+            styles.menuContainer,
+            {
+              width: menuWidth,
+              transform: [{ translateX }],
+            },
+          ]}
         >
-          <View style={styles.menuHeader}>
-            <Text style={styles.menuTitle}>Menu</Text>
-            <TouchableOpacity onPress={handleClose}>
-              <Ionicons name="close" size={24} color="#333" />
-            </TouchableOpacity>
-          </View>
+          <SafeAreaView edges={["top", "left", "right"]} style={styles.safeArea}>
+            {/* ---------- HEADER ---------- */}
+            <View style={styles.headerRow}>
+              {/* left: profile (avatar + title) */}
+              <View style={styles.headerLeft}>
+                <View style={styles.avatarSmall}>
+                  <Text style={styles.avatarSmallText}>
+                    {(user?.name || "QT").split(" ").map(p => p[0]).slice(0,2).join("").toUpperCase()}
+                  </Text>
+                </View>
+                <View style={styles.headerTitleBlock}>
+                  <Text style={styles.menuTitleText}>Menu</Text>
+                  <Text style={styles.roleText}>{user?.role || "Quản trị viên"}</Text>
+                </View>
+              </View>
 
-          {menuItems.map((item) => (
-            <TouchableOpacity
-              key={item.id}
-              style={styles.menuItem}
-              onPress={async () => {
-                if (item.route === "Logout") {
-                  // 👉 Xử lý đăng xuất ở đây
-                  navigation.reset({
-                    index: 0,
-                    routes: [{ name: "LoginScreen" }],
-                  });
+              {/* right: close button in circle */}
+              <Pressable
+                onPress={handleClose}
+                style={({ pressed }) => [
+                  styles.closeCircle,
+                  pressed && styles.closeCirclePressed,
+                ]}
+                accessibilityLabel="Đóng menu"
+                accessibilityRole="button"
+                android_ripple={{ color: "rgba(0,0,0,0.06)", radius: 26 }}
+              >
+                <Ionicons name="close" size={20} color="#2f3b4a" />
+              </Pressable>
+            </View>
 
-                  handleClose();
-                  return;
-                }
+            <View style={styles.headerSeparator} />
 
-                // 👉 Mặc định: điều hướng đến màn hình khác
-                navigation.navigate(item.route);
-                // animate out then inform parent
-                handleClose();
-              }}
-            >
-              <Ionicons name={item.icon} size={24} color="#666" />
-              <Text style={styles.menuItemText}>{item.title}</Text>
-            </TouchableOpacity>
-          ))}
+            {/* PROFILE / META */}
+            <View style={{ paddingVertical: 8 }}>
+              {renderProfile()}
+            </View>
+
+            <View style={styles.separator} />
+
+            <FlatList
+              data={items}
+              keyExtractor={(it) => it.id?.toString() || it.title}
+              renderItem={renderItem}
+              contentContainerStyle={styles.listContent}
+              showsVerticalScrollIndicator={false}
+            />
+
+            <View style={styles.footerNote}>
+              <Text style={styles.footerText}>Ứng dụng quản lý - Phiên bản 1.0</Text>
+            </View>
+          </SafeAreaView>
         </Animated.View>
 
-        {/* clickable overlay on the right (tap to close) */}
         <TouchableWithoutFeedback onPress={handleClose}>
           <View style={styles.overlayRight} />
         </TouchableWithoutFeedback>
@@ -105,40 +234,167 @@ export default function Menu({ visible, onClose, navigation }) {
 }
 
 const styles = StyleSheet.create({
-  modalOverlay: {
+  backdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "rgba(0,0,0,0.36)",
+  },
+  container: {
     flex: 1,
-    backgroundColor: "rgba(0,0,0,0.5)",
-    flexDirection: 'row',
+    flexDirection: "row",
   },
   menuContainer: {
-    width: "80%",
     height: "100%",
     backgroundColor: "#fff",
-    padding: 20,
+    paddingVertical: 8,
+    paddingHorizontal: 14,
+    ...Platform.select({
+      ios: {
+        shadowColor: "#000",
+        shadowOffset: { width: 0, height: 8 },
+        shadowOpacity: 0.08,
+        shadowRadius: 18,
+      },
+      android: {
+        elevation: 8,
+      },
+    }),
   },
-  overlayRight: {
+  safeArea: {
     flex: 1,
   },
-  menuHeader: {
+
+  /* Header improved */
+  headerRow: {
     flexDirection: "row",
-    justifyContent: "space-between",
     alignItems: "center",
-    marginBottom: 20,
+    justifyContent: "space-between",
+    paddingVertical: 10,
+    paddingHorizontal: 2,
   },
-  menuTitle: {
-    fontSize: 20,
-    fontWeight: "bold",
+  headerLeft: {
+    flexDirection: "row",
+    alignItems: "center",
+    flex: 1,
+  },
+  avatarSmall: {
+    width: 40,   // reduced from 44 -> 40
+    height: 40,
+    borderRadius: 10,
+    backgroundColor: "#EEF6FF",
+    alignItems: "center",
+    justifyContent: "center",
+    marginRight: 12,
+  },
+  avatarSmallText: {
+    fontSize: 15,
+    fontWeight: "700",
+    color: "#0f4a78",
+  },
+  headerTitleBlock: {
+    flexShrink: 1,
+  },
+  menuTitleText: {
+    fontSize: 18,
+    fontWeight: "700",
+    color: "#0f1724",
+  },
+  roleText: {
+    fontSize: 12,
+    color: "#6b7280",
+    marginTop: 4, // increased spacing between title and role
+  },
+   closeCircle: {
+    width: 44,
+    height: 44,
+    borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(15,23,36,0.04)",
+  },
+  closeCirclePressed: {
+    backgroundColor: "rgba(15,23,36,0.08)",
+  },
+  headerSeparator: {
+    height: 1,
+    backgroundColor: "#f1f5f9",
+    marginTop: 8,
+  },
+
+  profileRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: 8,
+  },
+  avatar: {
+    width: 56, // reduced from 64 -> 56
+    height: 56,
+    borderRadius: 12,
+    backgroundColor: "#E6EEF8",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  avatarText: {
+    fontSize: 18,
+    color: "#16457A",
+    fontWeight: "700",
+  },
+  profileMeta: {
+    marginLeft: 12,
+    flex: 1,
+  },
+  profileName: {
+    fontSize: 16,
+    fontWeight: "600",
+    color: "#0f1724",
+  },
+  profileEmail: {
+    fontSize: 13,
+    color: "#687684",
+    marginTop: 2,
+  },
+
+  separator: {
+    height: 1,
+    backgroundColor: "#eef3f7",
+    marginVertical: 12,
+  },
+  listContent: {
+    paddingBottom: 20,
   },
   menuItem: {
     flexDirection: "row",
     alignItems: "center",
-    paddingVertical: 15,
-    borderBottomWidth: 1,
-    borderBottomColor: "#eee",
+    paddingVertical: 14,
+    paddingHorizontal: 6,
+    borderRadius: 10,
+    marginBottom: 6,
+  },
+  menuItemPressed: {
+    backgroundColor: "rgba(20,40,60,0.03)",
+  },
+  iconWrapper: {
+    width: 42,
+    height: 42,
+    borderRadius: 10,
+    backgroundColor: "#f5f8fb",
+    alignItems: "center",
+    justifyContent: "center",
+    marginRight: 12,
   },
   menuItemText: {
-    marginLeft: 15,
+    flex: 1,
     fontSize: 16,
-    color: "#333",
+    color: "#132230",
+  },
+  overlayRight: {
+    flex: 1,
+  },
+  footerNote: {
+    marginTop: "auto",
+    paddingVertical: 12,
+  },
+  footerText: {
+    fontSize: 12,
+    color: "#9aa6b2",
   },
 });

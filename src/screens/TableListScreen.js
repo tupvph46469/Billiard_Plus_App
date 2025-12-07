@@ -65,7 +65,15 @@ export default function TableListScreen({ navigation }) {
       });
       
       if (res?.data?.items) {
-        setTables(res.data.items);
+        // CHUẨN HÓA: chuyển reserved/maintenance -> available trên client
+        const normalized = res.data.items.map(t => {
+          const status = (t.status || '').toString();
+          if (status === 'reserved' || status === 'maintenance') {
+            return { ...t, status: 'available' };
+          }
+          return t;
+        });
+        setTables(normalized);
       }
     } catch (error) {
       console.error('Error loading tables:', error);
@@ -115,12 +123,11 @@ export default function TableListScreen({ navigation }) {
   }, [loadTables, loadSessions]);
 
   const updateRealTimeData = useCallback(() => {
-    // ✅ SỬA: Không return early nếu sessions = 0, có thể tables vẫn cần update
+    // Không return early nếu sessions = 0; tables vẫn có thể cần update
     const newRealTimeData = {};
     
     tables.forEach(table => {
       if (table.status === 'playing') {
-        // ✅ SỬA: Tìm session chính xác cho table này
         const session = sessions.find(s => {
           const sessionTableId = String(s.table?._id || s.table?.id || s.table);
           const tableId = String(table._id || table.id);
@@ -160,7 +167,7 @@ export default function TableListScreen({ navigation }) {
     return () => clearInterval(dataInterval);
   }, [loadData, loadTables, loadSessions]);
 
-  // ✅ THÊM: useEffect để handle navigation focus và refresh data
+  // handle navigation focus và refresh data
   useEffect(() => {
     const unsubscribe = navigation.addListener('focus', () => {
       const state = navigation.getState();
@@ -168,10 +175,7 @@ export default function TableListScreen({ navigation }) {
       
       if (params?.refreshData) {
         console.log('🔄 Refresh data requested from navigation');
-        // Reset params để tránh reload liên tục
         navigation.setParams({ refreshData: undefined });
-        
-        // Reload data khi có refreshData param
         onRefresh();
       }
     });
@@ -179,14 +183,14 @@ export default function TableListScreen({ navigation }) {
     return unsubscribe;
   }, [navigation, onRefresh]);
 
-  // ✅ SỬA: Effect để update real-time data, loại bỏ dependency vòng lặp
+  // Effect để update real-time data, không include updateRealTimeData vào dependency để tránh vòng lặp
   useEffect(() => {
     if (tables.length > 0) {
       updateRealTimeData();
     }
-  }, [tables, sessions]); // ✅ Loại bỏ updateRealTimeData khỏi dependency
+  }, [tables, sessions]);
 
-  // ✅ SỬA: Timer effect với dependency đơn giản hơn
+  // Timer effect cập nhật currentTime & realtime mỗi giây
   useEffect(() => {
     const timeInterval = setInterval(() => {
       setCurrentTime(new Date());
@@ -196,7 +200,7 @@ export default function TableListScreen({ navigation }) {
     }, 1000);
 
     return () => clearInterval(timeInterval);
-  }, [tables.length]); // ✅ Chỉ dependency là tables.length
+  }, [tables.length]);
 
   const getStatusText = useCallback((table) => {
     switch (table.status) {
@@ -204,10 +208,6 @@ export default function TableListScreen({ navigation }) {
         const tableId = table._id || table.id;
         const realTime = realTimeData[tableId];
         return realTime || '0m';
-      case 'reserved':
-        return 'Đã đặt';
-      case 'maintenance':
-        return 'Bảo trì';
       default:
         return 'Trống';
     }
@@ -246,10 +246,9 @@ export default function TableListScreen({ navigation }) {
   const totalTables = mappedTables.length;
   const playingTables = mappedTables.filter(table => table.status === 'playing').length;
   const availableTables = mappedTables.filter(table => table.status === 'available').length;
-  const reservedTables = mappedTables.filter(table => table.status === 'reserved').length;
-  const maintenanceTables = mappedTables.filter(table => table.status === 'maintenance').length;
 
   const handleTablePress = (table) => {
+    // After normalization, table.status sẽ là 'available' hoặc 'playing'
     if (table.status === 'available') {
       navigation.navigate('OrderScreen', { 
         tableId: table.id,
@@ -265,13 +264,16 @@ export default function TableListScreen({ navigation }) {
         timeUsed: table.timeUsed,
         itemsCount: table.itemsCount
       });
-    } else if (table.status === 'reserved' || table.status === 'maintenance') {
-      Alert.alert(
-        'Thông báo', 
-        table.status === 'reserved' 
-          ? 'Bàn này đã được đặt trước' 
-          : 'Bàn này đang bảo trì'
-      );
+    } else {
+      // fallback: điều hướng như available (đảm bảo app vẫn hoạt động nếu có trạng thái bất thường)
+      navigation.navigate('OrderScreen', { 
+        tableId: table.id,
+        tableName: table.name,
+        ratePerHour: table.ratePerHour,
+        sessionId: table.sessionId,
+        timeUsed: table.timeUsed,
+        itemsCount: table.itemsCount
+      });
     }
   };
 
@@ -308,20 +310,14 @@ export default function TableListScreen({ navigation }) {
     switch (status) {
       case 'playing':
         return styles.playingCard;
-      case 'reserved':
-        return styles.reservedCard;
-      case 'maintenance':
-        return styles.maintenanceCard;
       default:
-        return styles.availableCard;
+        return styles.availableCard; // reserved/maintenance đã bị chuẩn hoá
     }
   };
 
   const getTableTextStyle = (status) => {
     switch (status) {
       case 'playing':
-      case 'reserved':
-      case 'maintenance':
         return styles.whiteText;
       default:
         return styles.darkText;
@@ -350,7 +346,7 @@ export default function TableListScreen({ navigation }) {
             {statusText}
           </Text>
 
-          {/* ✅ ĐÃ BỎ: Badge hiển thị số lượng món */}
+          {/* Badge về số lượng món đã bị loại bỏ */}
         </View>
       </TouchableOpacity>
     );
@@ -403,13 +399,10 @@ export default function TableListScreen({ navigation }) {
           <Text style={styles.statLabel}>Trống: </Text>
           <Text style={[styles.statValue, { color: '#34C759' }]}>{availableTables}</Text>
         </View>
+        {/* Nếu muốn hiển thị tổng, thêm block bên dưới */}
         <View style={styles.statItem}>
-          <Text style={styles.statLabel}>Đặt: </Text>
-          <Text style={[styles.statValue, { color: '#5856D6' }]}>{reservedTables}</Text>
-        </View>
-        <View style={styles.statItem}>
-          <Text style={styles.statLabel}>Bảo trì: </Text>
-          <Text style={[styles.statValue, { color: '#FF9500' }]}>{maintenanceTables}</Text>
+          <Text style={styles.statLabel}>Tổng: </Text>
+          <Text style={[styles.statValue, { color: '#333' }]}>{totalTables}</Text>
         </View>
       </View>
 
@@ -465,6 +458,11 @@ export default function TableListScreen({ navigation }) {
     </View>
   );
 }
+
+// LƯU Ý: phần styles được giữ nguyên (giả định bạn đã có styles trong file gốc).
+// Nếu trong file gốc bạn có styles (StyleSheet.create(...)), không cần thay đổi.
+// Nếu cần, tôi có thể cập nhật styles để loại bỏ các style không dùng (reservedCard/maintenanceCard).
+
 
 const styles = StyleSheet.create({
   container: {
