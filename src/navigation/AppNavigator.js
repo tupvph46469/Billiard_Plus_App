@@ -5,6 +5,7 @@ import { View, Text } from 'react-native';
 import BottomTabNavigator from "./BottomTabNavigator";
 import OrderScreen from "../screens/OrderScreen";
 import OrderDetail from "../screens/OrderDetail";
+import ChooseTableScreen from "../screens/ChooseTableScreen"; // THÊM IMPORT NÀY
 import LoginScreen from "../screens/LoginScreen";
 import ThanhToanScreen from "../screens/ThanhToanScreen";
 import PaymentSuccessScreen from "../screens/PaymentSuccessScreen";
@@ -41,6 +42,7 @@ export default function AppNavigator() {
         <Stack.Screen name="Main" component={BottomTabNavigator} />
         <Stack.Screen name="OrderScreen" component={OrderScreen} />
         <Stack.Screen name="OrderDetail" component={OrderDetail} />
+        <Stack.Screen name="ChooseTableScreen" component={ChooseTableScreen} />
         <Stack.Screen name="ThanhToan" component={ThanhToanScreen} />
         <Stack.Screen name="ThanhToanSuccess" component={PaymentSuccessScreen} />
         <Stack.Screen name="Restaurant" component={RestaurantScreen} />
