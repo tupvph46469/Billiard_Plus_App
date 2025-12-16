@@ -136,6 +136,24 @@ export const sessionService = {
     }
   },
 
+  // Đổi bàn (transfer)
+  transfer: async (sessionId, toTableId, note = '') => {
+    try {
+      console.log('🔄 [Session] Transferring session:', sessionId, 'to table:', toTableId);
+      
+      const response = await api.patch(`/sessions/${sessionId}/transfer`, {
+        toTableId,
+        note: note.trim()
+      });
+      
+      console.log('✅ [Session] Transfer success:', response.data);
+      return response.data;
+    } catch (error) {
+      console.error('❌ [Session] Transfer error:', error);
+      throw error;
+    }
+  },
+
   // Helper: Tính toán thời gian từ startTime
   calculateDuration: (startTime, endTime = null) => {
     if (!startTime) return { hours: 0, minutes: 0, totalMinutes: 0 };

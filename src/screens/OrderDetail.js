@@ -241,19 +241,18 @@ export default function OrderDetail({ navigation, route }) {
       case 'Hủy đơn':
         setShowCancelDialog(true);
         break;
-      case 'Thay đổi bàn':
+      case 'Thay đổi bàn': // Đây chính là đổi bàn
         navigation.navigate('ChooseTableScreen', {
-          currentSessionId: sessionId,
-          currentTableId: tableId,
-          currentTableName: tableName,
-          currentRatePerHour: ratePerHour
+          transferMode: true,
+          sessionId: sessionId,
+          currentTableName: tableName
         });
         break;
       default:
         showToast('Chức năng đang phát triển', 'info');
         break;
     }
-  }, [sessionId, tableId, tableName, ratePerHour, navigation]);
+  }, [sessionId, tableName, navigation]);
 
   // Function handleCheckoutPayment - SỬ DỤNG API CHECKOUT VÀ CHUYỂN TỚI PAYMENT SCREEN
   const handleCheckoutPayment = useCallback(async () => {
