@@ -9,21 +9,19 @@ import {
   Dimensions,
   TouchableWithoutFeedback,
   FlatList,
-  Platform,
+  Alert,
 } from "react-native";
 
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Ionicons } from "@expo/vector-icons";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { Alert } from "react-native";
-
-
 
 const BASE_DURATION = 220;
 
 const defaultMenuItems = [
   { id: "management", title: "Quản lý quán", icon: "people", route: "Management", disabled: true },
   { id: "bills", title: "Quản lý hóa đơn", icon: "receipt", route: "Bills" },
-  { id: "settings", title: "Thiết lập", icon: "settings", route: "Settings", disabled: true },
+  { id: "settings", title: "Thiết lập", icon: "settings", disabled: true },
   { id: "logout", title: "Đăng xuất", icon: "log-out", route: "Logout" },
 ];
 
@@ -32,14 +30,36 @@ export default function Menu({
   onClose,
   navigation,
   items = defaultMenuItems,
-  user = null, // { name, email, role }
 }) {
+  /* ===================== USER ===================== */
+  const [user, setUser] = useState(null);
+
+  // 🔥 LOAD USER MỖI LẦN MỞ MENU
+  useEffect(() => {
+    if (!visible) return;
+
+    const loadUser = async () => {
+      try {
+        const str = await AsyncStorage.getItem("user");
+        if (str) {
+          setUser(JSON.parse(str));
+        }
+      } catch (e) {
+        console.log("❌ Menu load user error:", e);
+      }
+    };
+
+    loadUser();
+  }, [visible]);
+
+  /* ===================== ANIMATION ===================== */
   const screenWidth = Dimensions.get("window").width;
   const menuWidth = Math.min(420, screenWidth * 0.82);
 
+  const [showModal, setShowModal] = useState(visible);
+
   const translateX = useRef(new Animated.Value(-menuWidth)).current;
   const backdropOpacity = useRef(new Animated.Value(0)).current;
-  const [showModal, setShowModal] = useState(visible);
 
   useEffect(() => {
     if (visible) {
@@ -56,7 +76,7 @@ export default function Menu({
           useNativeDriver: true,
         }),
       ]).start();
-    } else if (showModal) {
+    } else {
       Animated.parallel([
         Animated.timing(translateX, {
           toValue: -menuWidth,
@@ -90,8 +110,10 @@ export default function Menu({
     });
   };
 
+  /* ===================== MENU ACTION ===================== */
   const onItemPress = (item) => {
     if (item.route === "Logout") {
+      AsyncStorage.removeItem("user");
       navigation.reset({
         index: 0,
         routes: [{ name: "LoginScreen" }],
@@ -99,94 +121,69 @@ export default function Menu({
       handleClose();
       return;
     }
-// Chức năng đang phát triển
-  if (item.disabled || !item.route) {
-    Alert.alert(
-      "Thông báo",
-      "Chức năng đang được phát triển, vui lòng quay lại sau."
-    );
-    handleClose();
-    return;
-  }
 
-  // Điều hướng bình thường
+    if (item.disabled || !item.route) {
+      Alert.alert("Thông báo", "Chức năng đang được phát triển");
+      handleClose();
+      return;
+    }
+
     navigation.navigate(item.route);
     handleClose();
   };
 
-  const renderProfile = () => {
-    const name = user?.name || "Quản trị viên";
-    const email = user?.email || null;
-    const initials = name
-      .split(" ")
-      .map(p => p[0])
-      .slice(0, 2)
-      .join("")
-      .toUpperCase();
+  /* ===================== PROFILE ===================== */
+  const name = user?.name?.trim() || "";
+  const email = user?.email || "";
 
-    return (
-      <View style={styles.profileRow}>
-        <View style={styles.avatar}>
-          <Text style={styles.avatarText}>{initials}</Text>
-        </View>
+  const initials = name
+    ? name
+        .split(" ")
+        .map((p) => p[0])
+        .slice(0, 2)
+        .join("")
+        .toUpperCase()
+    : "";
 
-        <View style={styles.profileMeta}>
-          <Text style={styles.profileName} numberOfLines={1}>
-            {name}
-          </Text>
-          {email ? (
-            <Text style={styles.profileEmail} numberOfLines={1}>
-              {email}
-            </Text>
-          ) : null}
-        </View>
+  const renderProfile = () => (
+    <View style={styles.profileRow}>
+      <View style={styles.avatar}>
+        <Text style={styles.avatarText}>{initials}</Text>
       </View>
-    );
-  };
 
-  const renderItem = ({ item }) => {
-  const disabled = item.disabled;
+      <View style={styles.profileMeta}>
+        <Text style={styles.profileName} numberOfLines={1}>
+          {name || " "}
+        </Text>
+        {email ? (
+          <Text style={styles.profileEmail} numberOfLines={1}>
+            {email}
+          </Text>
+        ) : null}
+      </View>
+    </View>
+  );
 
-  return (
+  const renderItem = ({ item }) => (
     <Pressable
-      onPress={() => !disabled && onItemPress(item)}
-      android_ripple={
-        disabled ? null : { color: "rgba(0,0,0,0.06)" }
-      }
-      style={[
-        styles.menuItem,
-        disabled && { opacity: 0.45 },
-      ]}
+      onPress={() => !item.disabled && onItemPress(item)}
+      style={[styles.menuItem, item.disabled && { opacity: 0.45 }]}
     >
       <View style={styles.iconWrapper}>
-        <Ionicons
-          name={item.icon}
-          size={20}
-          color={disabled ? "#9ca3af" : "#2f3b4a"}
-        />
+        <Ionicons name={item.icon} size={20} />
       </View>
-
       <Text style={styles.menuItemText}>{item.title}</Text>
-
-      {!disabled && (
-        <Ionicons
-          name="chevron-forward"
-          size={18}
-          color="#9aa6b2"
-        />
-      )}
+      {!item.disabled && <Ionicons name="chevron-forward" size={18} />}
     </Pressable>
   );
-};
-
 
   return (
     <Modal
       transparent
       visible={showModal}
       onRequestClose={handleClose}
-      statusBarTranslucent
       animationType="none"
+      statusBarTranslucent
     >
       <Animated.View style={[styles.backdrop, { opacity: backdropOpacity }]} />
 
@@ -197,29 +194,10 @@ export default function Menu({
             { width: menuWidth, transform: [{ translateX }] },
           ]}
         >
-          <SafeAreaView edges={["top", "left", "right"]} style={styles.safeArea}>
+          <SafeAreaView style={styles.safeArea}>
             {/* HEADER */}
             <View style={styles.headerRow}>
-              <View style={styles.headerLeft}>
-                <View style={styles.avatarSmall}>
-                  <Text style={styles.avatarSmallText}>
-                    {(user?.name || "QT")
-                      .split(" ")
-                      .map(p => p[0])
-                      .slice(0, 2)
-                      .join("")
-                      .toUpperCase()}
-                  </Text>
-                </View>
-                <View>
-                  <Text style={styles.menuTitleText}>Menu</Text>
-                  <Text style={styles.roleText}>
-  {user?.name || "Quản trị viên"}
-</Text>
-
-                </View>
-              </View>
-
+              <Text style={styles.menuTitleText}>Menu</Text>
               <Pressable onPress={handleClose} style={styles.closeCircle}>
                 <Ionicons name="close" size={20} />
               </Pressable>
@@ -227,13 +205,12 @@ export default function Menu({
 
             <View style={styles.headerSeparator} />
 
-            {/* PROFILE – CÓ ONPRESS */}
+            {/* PROFILE */}
             <Pressable
               onPress={() => {
                 navigation.navigate("Profile");
                 handleClose();
               }}
-              android_ripple={{ color: "rgba(0,0,0,0.06)" }}
               style={{ paddingVertical: 8 }}
             >
               {renderProfile()}
@@ -247,12 +224,6 @@ export default function Menu({
               renderItem={renderItem}
               showsVerticalScrollIndicator={false}
             />
-
-            <View style={styles.footerNote}>
-              <Text style={styles.footerText}>
-                Ứng dụng quản lý - Phiên bản 1.0
-              </Text>
-            </View>
           </SafeAreaView>
         </Animated.View>
 
@@ -264,6 +235,7 @@ export default function Menu({
   );
 }
 
+/* ===================== STYLE ===================== */
 const styles = StyleSheet.create({
   backdrop: {
     ...StyleSheet.absoluteFillObject,
@@ -283,22 +255,7 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     alignItems: "center",
   },
-  headerLeft: { flexDirection: "row", alignItems: "center" },
-
-  avatarSmall: {
-    width: 40,
-    height: 40,
-    borderRadius: 10,
-    backgroundColor: "#EEF6FF",
-    justifyContent: "center",
-    alignItems: "center",
-    marginRight: 12,
-  },
-  avatarSmallText: { fontWeight: "700", color: "#0f4a78" },
-
   menuTitleText: { fontSize: 18, fontWeight: "700" },
-  roleText: { fontSize: 12, color: "#6b7280" },
-
   closeCircle: {
     width: 44,
     height: 44,
@@ -339,7 +296,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
     paddingVertical: 14,
   },
-  menuItemPressed: { backgroundColor: "#f8fafc" },
   iconWrapper: {
     width: 42,
     height: 42,
@@ -352,7 +308,4 @@ const styles = StyleSheet.create({
   menuItemText: { flex: 1, fontSize: 16 },
 
   overlayRight: { flex: 1 },
-
-  footerNote: { marginTop: "auto", paddingVertical: 12 },
-  footerText: { fontSize: 12, color: "#9aa6b2" },
 });
