@@ -13,14 +13,16 @@ import {
   Platform,
   Modal,
   TextInput,
+  FlatList,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { sessionService } from '../services/sessionService';
 import { tableService } from '../services/tableService';
 import { listAreas } from '../services/areaService';
+import { promotionService } from '../services/promotionService'; // Thêm import promotionService
 import { CONFIG } from '../constants/config';
 import { Ionicons } from '@expo/vector-icons';
-import api from '../services/api'; // Import api để fetch products
+import api from '../services/api';
 
 // Hàm lấy URL hình ảnh sản phẩm
 const BASE_URL = CONFIG.baseURL.replace(/\/$/, '');
@@ -47,16 +49,17 @@ const showToast = (message, type = 'success') => {
   if (Platform.OS === 'android') {
     ToastAndroid.show(message, ToastAndroid.SHORT);
   } else {
-    // Cho iOS, sử dụng Alert với timeout ngắn
     Alert.alert('', message, [], { cancelable: true });
-    setTimeout(() => {
-      // Tự động đóng alert sau 2 giây (iOS không có API để đóng)
-    }, 2000);
+    setTimeout(() => {}, 2000);
   }
 };
 
 export default function OrderDetail({ navigation, route }) {
-  const [selectedTab, setSelectedTab] = useState('promotion');
+  // Thay đổi states cho promotion - bỏ dummy data
+  const [availablePromotions, setAvailablePromotions] = useState([]);
+  const [appliedPromotions, setAppliedPromotions] = useState([]);
+  const [promotionLoading, setPromotionLoading] = useState(false);
+
   const [area, setArea] = useState('Đang tải...');
   const [showMenu, setShowMenu] = useState(false);
   const [sessionData, setSessionData] = useState(null);
@@ -76,8 +79,8 @@ export default function OrderDetail({ navigation, route }) {
   const [itemToDelete, setItemToDelete] = useState(null);
 
   // THÊM STATE MỚI ĐỂ TRACK THAY ĐỔI LOCAL
-  const [localQuantityChanges, setLocalQuantityChanges] = useState({}); // { itemId: newQty }
-  const [deletedItems, setDeletedItems] = useState(new Set()); // Set của các itemId đã xóa
+  const [localQuantityChanges, setLocalQuantityChanges] = useState({});
+  const [deletedItems, setDeletedItems] = useState(new Set());
 
   // Lấy params từ navigation
   const { sessionId, tableName, tableId, ratePerHour } = route?.params || {};
@@ -90,16 +93,232 @@ export default function OrderDetail({ navigation, route }) {
     'Lý do khác'
   ];
 
+  // Load promotions từ API
+  const loadPromotions = useCallback(async () => {
+    try {
+      console.log('🎁 Loading promotions...');
+      setPromotionLoading(true);
+
+      // Lấy promotions active tại thời điểm hiện tại
+      const response = await promotionService.getActivePromotions();
+      const promotions = response.data?.items || response.data || response || [];
+
+      console.log('✅ Promotions loaded:', promotions.length);
+
+      // Transform API data thành format hiển thị và kiểm tra điều kiện áp dụng
+      const transformedPromotions = await Promise.all(
+        promotions.map(async (promo) => {
+          const applicable = await checkPromotionApplicability(promo);
+          
+          return {
+            id: promo.id || promo._id,
+            name: promo.name,
+            code: promo.code,
+            description: promo.description || generatePromotionDescription(promo),
+            // SỬA: Chuẩn hóa discountType từ MongoDB
+            discountType: promo.discount.type === 'percentage' ? 'percent' : 
+                          promo.discount.type === 'fixed' ? 'value' : 
+                          promo.discount.type,
+            discountValue: promo.discount.value,
+            applyTo: promo.discount.applyTo, // 'play' | 'service' | 'bill'
+            maxAmount: promo.discount.maxAmount,
+            scope: promo.scope, // 'time' | 'product' | 'bill'
+            active: promo.active,
+            // SỬA: Lấy từ conditions thay vì trực tiếp
+            conditions: promo.conditions,
+            timeRule: promo.conditions?.timeRules?.[0], // backward compatibility
+            productRule: promo.conditions?.productRules?.[0],
+            billRule: promo.conditions?.billRules?.[0],
+            stackable: promo.stackable,
+            applyOrder: promo.applyOrder,
+            applicable: applicable
+          };
+        })
+      );
+
+      setAvailablePromotions(transformedPromotions);
+
+    } catch (error) {
+      console.error('❌ Error loading promotions:', error);
+      showToast('❌ Không thể tải khuyến mãi', 'error');
+      setAvailablePromotions([]);
+    } finally {
+      setPromotionLoading(false);
+    }
+  }, [sessionData, playingTime]);
+
+  // Kiểm tra promotion có thể áp dụng không
+  const checkPromotionApplicability = useCallback(async (promotion) => {
+    try {
+      const now = new Date();
+
+      // 1. Kiểm tra thời gian hiệu lực (đã được lọc trong getActivePromotions)
+      
+      // 2. Kiểm tra điều kiện theo scope
+      switch (promotion.scope) {
+        case 'time':
+          return checkTimePromotionApplicability(promotion, now);
+        
+        case 'product':
+          return checkProductPromotionApplicability(promotion);
+        
+        case 'bill':
+          return checkBillPromotionApplicability(promotion);
+        
+        default:
+          return false;
+      }
+    } catch (error) {
+      console.error('❌ Error checking promotion applicability:', error);
+      return false;
+    }
+  }, [sessionData, playingTime]);
+
+  // Kiểm tra promotion time scope
+  const checkTimePromotionApplicability = useCallback((promotion, checkTime) => {
+    // Sửa: Lấy timeRules từ conditions (số nhiều)
+    const timeRules = promotion.conditions?.timeRules;
+    if (!timeRules || timeRules.length === 0) return false;
+
+    const dayOfWeek = checkTime.getDay(); // 0=CN, 1=T2, ...
+    const currentTime = `${String(checkTime.getHours()).padStart(2, '0')}:${String(checkTime.getMinutes()).padStart(2, '0')}`;
+
+    // Kiểm tra xem có bất kỳ time rule nào phù hợp không
+    const hasValidTimeRule = timeRules.some(timeRule => {
+      // Kiểm tra ngày trong tuần
+      if (timeRule.daysOfWeek && timeRule.daysOfWeek.length > 0) {
+        if (!timeRule.daysOfWeek.includes(dayOfWeek)) {
+          return false;
+        }
+      }
+
+      // Kiểm tra khung giờ - Sửa: dùng startTime/endTime thay vì timeRanges
+      if (timeRule.startTime && timeRule.endTime) {
+        // Xử lý trường hợp qua đêm (startTime > endTime)
+        if (timeRule.startTime > timeRule.endTime) {
+          // Ví dụ: 22:00 - 06:00 (qua đêm)
+          const isValid = currentTime >= timeRule.startTime || currentTime <= timeRule.endTime;
+          if (!isValid) return false;
+        } else {
+          // Trường hợp bình thường: 08:00 - 16:00
+          const isValid = currentTime >= timeRule.startTime && currentTime <= timeRule.endTime;
+          if (!isValid) return false;
+        }
+      }
+
+      // Kiểm tra thời gian chơi tối thiểu (nếu có)
+      if (timeRule.minMinutes && playingTime < timeRule.minMinutes) {
+        return false;
+      }
+
+      return true;
+    });
+
+    return hasValidTimeRule;
+  }, [playingTime]);
+
+  // Kiểm tra promotion product scope
+  const checkProductPromotionApplicability = useCallback((promotion) => {
+    const productRule = promotion.productRule;
+    if (!productRule) return false;
+    if (!sessionData?.items || sessionData.items.length === 0) return false;
+
+    const sessionProducts = sessionData.items.map(item => item.product);
+
+    // Kiểm tra sản phẩm cụ thể
+    if (productRule.products && productRule.products.length > 0) {
+      const hasMatchingProduct = productRule.products.some(productId =>
+        sessionProducts.includes(productId)
+      );
+      if (hasMatchingProduct) return true;
+    }
+
+    // Kiểm tra combo
+    if (productRule.combo && productRule.combo.length > 0) {
+      return productRule.combo.every(comboItem => {
+        const productInSession = sessionData.items.find(item => 
+          item.product === comboItem.product
+        );
+        return productInSession && productInSession.qty >= comboItem.qty;
+      });
+    }
+
+    // Kiểm tra danh mục (cần thêm logic nếu có category info)
+    // TODO: Implement category check if needed
+
+    return false;
+  }, [sessionData]);
+
+  // Kiểm tra promotion bill scope
+  const checkBillPromotionApplicability = useCallback((promotion) => {
+    const billRule = promotion.billRule;
+    if (!billRule) return false;
+
+    const currentTotal = getTotalAmount();
+    const currentFoodTotal = getFoodTotal();
+
+    // Kiểm tra tổng tiền tối thiểu
+    if (billRule.minSubtotal && currentTotal < billRule.minSubtotal) {
+      return false;
+    }
+
+    // Kiểm tra tiền dịch vụ tối thiểu
+    if (billRule.minServiceAmount && currentFoodTotal < billRule.minServiceAmount) {
+      return false;
+    }
+
+    // Kiểm tra thời gian chơi tối thiểu
+    if (billRule.minPlayMinutes && playingTime < billRule.minPlayMinutes) {
+      return false;
+    }
+
+    return true;
+  }, [playingTime]);
+
+  // Generate description nếu không có
+  const generatePromotionDescription = useCallback((promotion) => {
+    const discount = promotion.discount;
+    let desc = '';
+
+    if (discount.type === 'percent') {
+      desc = `Giảm ${discount.value}% `;
+    } else {
+      desc = `Giảm ${discount.value.toLocaleString()}đ `;
+    }
+
+    switch (discount.applyTo) {
+      case 'play':
+        desc += 'tiền giờ chơi';
+        break;
+      case 'service':
+        desc += 'dịch vụ F&B';
+        break;
+      case 'bill':
+        desc += 'toàn hóa đơn';
+        break;
+    }
+
+    if (discount.maxAmount) {
+      desc += ` (tối đa ${discount.maxAmount.toLocaleString()}đ)`;
+    }
+
+    // Thêm điều kiện nếu có
+    if (promotion.scope === 'time' && promotion.timeRule?.timeRanges?.length > 0) {
+      const timeRange = promotion.timeRule.timeRanges[0];
+      desc += ` từ ${timeRange.from}-${timeRange.to}`;
+    }
+
+    return desc;
+  }, []);
+
   // Load area information for the table
   const loadAreaInfo = useCallback(async () => {
     try {
       if (tableId) {
-        // Get table details
         const tableResponse = await tableService.getById(tableId);
         const table = tableResponse.data || tableResponse;
 
         if (table.areaId) {
-          // Get areas list to find the area name
           const areasResponse = await listAreas();
           const areas = areasResponse.data?.data || areasResponse.data || areasResponse;
 
@@ -152,6 +371,244 @@ export default function OrderDetail({ navigation, route }) {
       setLoading(false);
     }
   }, [sessionId]);
+
+  // Load data khi component mount
+  useEffect(() => {
+    const loadData = async () => {
+      if (sessionId) {
+        await loadSessionData();
+      }
+      if (tableId) {
+        await loadAreaInfo();
+      }
+      if (!sessionId && !tableId) {
+        setLoading(false);
+      }
+    };
+
+    loadData();
+  }, [sessionId, tableId, loadSessionData, loadAreaInfo]);
+
+  // Load promotions khi có session data
+  useEffect(() => {
+    if (sessionData) {
+      loadPromotions();
+    }
+  }, [sessionData, playingTime, loadPromotions]);
+
+  // Load products data khi có session items
+  useEffect(() => {
+    if (sessionData?.items && sessionData.items.length > 0) {
+      loadProductsData();
+    }
+  }, [sessionData]);
+
+  // Tính thời gian chơi real-time và reload promotions
+  useEffect(() => {
+    let interval = null;
+
+    if (sessionData && sessionData.startTime) {
+      interval = setInterval(() => {
+        const startTime = new Date(sessionData.startTime);
+        const currentTime = new Date();
+        const playingMinutes = Math.floor((currentTime - startTime) / (1000 * 60));
+        setPlayingTime(playingMinutes);
+        
+        // Reload promotions để cập nhật tính khả dụng
+        loadPromotions();
+      }, 60000); // Mỗi phút
+    }
+
+    return () => {
+      if (interval) clearInterval(interval);
+    };
+  }, [sessionData, loadPromotions]);
+
+  // Xử lý khi nhấn vào promotion
+  const handlePromotionPress = useCallback((promotion) => {
+    const isApplied = appliedPromotions.some(p => p.id === promotion.id);
+    
+    if (isApplied) {
+      // Bỏ áp dụng promotion hiện tại
+      setAppliedPromotions(prev => prev.filter(p => p.id !== promotion.id));
+      showToast(`Đã bỏ khuyến mãi ${promotion.code}`);
+    } else if (promotion.applicable) {
+      // Kiểm tra stackable
+      if (!promotion.stackable && appliedPromotions.length > 0) {
+        // THAY ĐỔI: Thay thế promotion thay vì hiển thị lỗi
+        setAppliedPromotions([promotion]); // Thay thế tất cả bằng promotion mới
+        showToast(`Đã áp dụng khuyến mãi ${promotion.code}`);
+        return;
+      }
+
+      // Kiểm tra conflict với promotions đã áp dụng
+      const conflictPromotions = appliedPromotions.filter(applied => 
+        !applied.stackable || applied.applyTo === promotion.applyTo
+      );
+
+      if (conflictPromotions.length > 0) {
+        // THAY ĐỔI: Thay thế promotion conflict thay vì hiển thị lỗi
+        const remainingPromotions = appliedPromotions.filter(applied => 
+          applied.stackable && applied.applyTo !== promotion.applyTo
+        );
+        setAppliedPromotions([...remainingPromotions, promotion]);
+        showToast(`Đã thay thế bằng khuyến mãi ${promotion.code}`);
+        return;
+      }
+
+      // Áp dụng promotion bình thường (stackable)
+      setAppliedPromotions(prev => [...prev, promotion]);
+      showToast(`Đã áp dụng khuyến mãi ${promotion.code}`);
+    } else {
+      showToast('Khuyến mãi này chưa đủ điều kiện áp dụng', 'error');
+    }
+  }, [appliedPromotions]);
+
+  // Render promotion item trong horizontal scroll
+  const renderPromotionItem = ({ item }) => {
+    const isApplied = appliedPromotions.some(p => p.id === item.id);
+    const canApply = item.applicable && !isApplied;
+
+    return (
+      <TouchableOpacity
+        style={[
+          styles.promotionCard,
+          isApplied && styles.promotionCardApplied,
+          !item.applicable && styles.promotionCardDisabled
+        ]}
+        onPress={() => handlePromotionPress(item)}
+        disabled={!canApply && !isApplied}
+      >
+        {/* Header với mã và trạng thái */}
+        <View style={styles.promotionHeader}>
+          <View style={styles.promotionCodeContainer}>
+            <Text style={[
+              styles.promotionCode,
+              isApplied && styles.promotionCodeApplied
+            ]}>
+              {item.code}
+            </Text>
+          </View>
+          
+          {isApplied && (
+            <View style={styles.appliedBadge}>
+              <Ionicons name="checkmark-circle" size={16} color="#22c55e" />
+              <Text style={styles.appliedText}>Đã áp dụng</Text>
+            </View>
+          )}
+        </View>
+
+        {/* Tên promotion */}
+        <Text style={[
+          styles.promotionName,
+          !item.applicable && styles.promotionNameDisabled
+        ]} numberOfLines={1}>
+          {item.name}
+        </Text>
+
+        {/* Mô tả */}
+        <Text style={[
+          styles.promotionDescription,
+          !item.applicable && styles.promotionDescriptionDisabled
+        ]} numberOfLines={2}>
+          {item.description}
+        </Text>
+
+        {/* Footer với loại giảm giá */}
+        <View style={styles.promotionFooter}>
+          <View style={styles.discountInfo}>
+            <Text style={[
+              styles.discountText,
+              !item.applicable && styles.discountTextDisabled
+            ]}>
+              {item.discountType === 'percent' 
+                ? `Giảm ${item.discountValue}%` 
+                : `Giảm ${item.discountValue.toLocaleString()}đ`
+              }
+            </Text>
+            {item.maxAmount && item.discountType === 'percent' && (
+              <Text style={styles.maxAmountText}>
+                (Tối đa {item.maxAmount.toLocaleString()}đ)
+              </Text>
+            )}
+          </View>
+
+          {!item.applicable && !isApplied && (
+            <View style={styles.notApplicableBadge}>
+              <Text style={styles.notApplicableText}>Không áp dụng</Text>
+            </View>
+          )}
+        </View>
+      </TouchableOpacity>
+    );
+  };
+
+  // Sửa lại renderPromotionContent để hiển thị promotions từ API
+  const renderPromotionContent = () => (
+    <View style={styles.promotionSection}>
+      <View style={styles.promotionSectionHeader}>
+        <Text style={styles.promotionSectionTitle}>Khuyến mãi có sẵn</Text>
+        <Text style={styles.promotionSectionSubtitle}>
+          {availablePromotions.filter(p => p.applicable).length} khuyến mãi có thể áp dụng
+        </Text>
+      </View>
+      
+      {promotionLoading ? (
+        <View style={styles.promotionLoadingContainer}>
+          <ActivityIndicator size="small" color="#2196F3" />
+          <Text style={styles.promotionLoadingText}>Đang tải khuyến mãi...</Text>
+        </View>
+      ) : availablePromotions.length > 0 ? (
+        <FlatList
+          data={availablePromotions}
+          renderItem={renderPromotionItem}
+          keyExtractor={item => item.id}
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.promotionList}
+          ItemSeparatorComponent={() => <View style={{ width: 12 }} />}
+        />
+      ) : (
+        <View style={styles.noPromotionContainer}>
+          <Ionicons name="gift-outline" size={48} color="#d1d5db" />
+          <Text style={styles.noPromotionText}>Không có khuyến mãi nào</Text>
+        </View>
+      )}
+    </View>
+  );
+
+  // Tính tổng tiền với promotion
+  const getTotalAmountWithPromotions = () => {
+    let total = getTotalAmount();
+    let totalDiscount = 0;
+
+    // Áp dụng promotions theo thứ tự priority
+    const sortedPromotions = [...appliedPromotions].sort((a, b) => a.applyOrder - b.applyOrder);
+
+    sortedPromotions.forEach(promotion => {
+      let discount = 0;
+      const baseAmount = promotion.applyTo === 'play' ? getPlayingFee() : 
+                       promotion.applyTo === 'service' ? getFoodTotal() : total;
+
+      if (promotion.discountType === 'percent') {
+        discount = Math.round(baseAmount * promotion.discountValue / 100);
+        if (promotion.maxAmount && discount > promotion.maxAmount) {
+          discount = promotion.maxAmount;
+        }
+      } else {
+        discount = promotion.discountValue;
+      }
+
+      totalDiscount += discount;
+    });
+
+    return Math.max(0, total - totalDiscount);
+  };
+
+  // Tính tổng discount
+  const getTotalDiscount = () => {
+    return getTotalAmount() - getTotalAmountWithPromotions();
+  };
 
   // Function handleSave - LƯU SESSION VÀ CHUYỂN VỀ TABLE LIST (với Toast)
   const handleSave = useCallback(async () => {
@@ -502,7 +959,7 @@ export default function OrderDetail({ navigation, route }) {
 
     if (sessionData?.items && sessionData.items.length > 0) {
       total += sessionData.items.reduce((sum, item) => {
-        // Bỏ qua nếu item đã bị xóa local
+        // Bỏ qua nếu item đã bị xóa
         if (deletedItems.has(item._id)) {
           return sum;
         }
@@ -662,16 +1119,6 @@ export default function OrderDetail({ navigation, route }) {
 
     return items;
   };
-
-  const renderTabContent = () => (
-    <View style={styles.tabContent}>
-      <Text style={styles.tabContentText}>
-        {selectedTab === 'promotion' && 'Chưa có khuyến mại nào được áp dụng'}
-        {selectedTab === 'discount' && 'Chưa có chiết khấu nào được áp dụng'}
-        {selectedTab === 'tax' && 'Thuế VAT: 0%'}
-      </Text>
-    </View>
-  );
 
   // Loading state
   if (loading) {
@@ -915,51 +1362,39 @@ export default function OrderDetail({ navigation, route }) {
         {orderItems.map((item, index) => renderOrderItem(item, index))}
       </ScrollView>
 
-      {/* Total Section */}
+      {/* Total Section với Promotions */}
       <View style={styles.totalSection}>
-        <Text style={styles.totalLabel}>SL: {getTotalQuantity()}</Text>
-        <Text style={styles.totalAmount}>
-          Tổng: {getTotalAmount().toLocaleString()}đ
-        </Text>
+        <View style={styles.totalLeftSection}>
+          <Text style={styles.totalLabel}>SL: {getTotalQuantity()}</Text>
+          {getTotalDiscount() > 0 && (
+            <Text style={styles.discountLabel}>
+              Giảm: -{getTotalDiscount().toLocaleString()}đ
+            </Text>
+          )}
+        </View>
+        <View style={styles.totalRightSection}>
+          {getTotalDiscount() > 0 && (
+            <Text style={styles.originalAmount}>
+              {getTotalAmount().toLocaleString()}đ
+            </Text>
+          )}
+          <Text style={styles.totalAmount}>
+            Tổng: {getTotalAmountWithPromotions().toLocaleString()}đ
+          </Text>
+        </View>
       </View>
 
-      {/* Tabs */}
+      {/* Tabs - chỉ còn Khuyến mại */}
       <View style={styles.bottomTabs}>
-        <TouchableOpacity
-          style={[styles.tab, selectedTab === 'promotion' && styles.activeTab]}
-          onPress={() => setSelectedTab('promotion')}
-        >
-          <Text
-            style={[styles.tabText, selectedTab === 'promotion' && styles.activeTabText]}
-          >
+        <View style={[styles.tab, styles.activeTab]}>
+          <Text style={[styles.tabText, styles.activeTabText]}>
             Khuyến mại
           </Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={[styles.tab, selectedTab === 'discount' && styles.activeTab]}
-          onPress={() => setSelectedTab('discount')}
-        >
-          <Text
-            style={[styles.tabText, selectedTab === 'discount' && styles.activeTabText]}
-          >
-            Chiết khấu
-          </Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={[styles.tab, selectedTab === 'tax' && styles.activeTab]}
-          onPress={() => setSelectedTab('tax')}
-        >
-          <Text
-            style={[styles.tabText, selectedTab === 'tax' && styles.activeTabText]}
-          >
-            Thuế & Phí
-          </Text>
-        </TouchableOpacity>
+        </View>
       </View>
 
-      {renderTabContent()}
+      {/* Promotion Content */}
+      {renderPromotionContent()}
 
       {/* Bottom Buttons */}
       <View style={styles.bottomButtons}>
@@ -997,7 +1432,7 @@ export default function OrderDetail({ navigation, route }) {
         </TouchableOpacity>
       </View>
 
-      {/* Menu overlay - unchanged */}
+      {/* Menu và Dialogs giữ nguyên */}
       {showMenu && (
         <TouchableOpacity
           activeOpacity={1}
@@ -1255,8 +1690,33 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     padding: 16,
   },
-  totalLabel: { color: '#666' },
-  totalAmount: { fontWeight: 'bold' },
+  totalLeftSection: {
+    flex: 1,
+  },
+  totalRightSection: {
+    alignItems: 'flex-end',
+  },
+  totalLabel: { 
+    color: '#666',
+    fontSize: 14,
+  },
+  discountLabel: {
+    color: '#dc2626',
+    fontSize: 14,
+    fontWeight: '600',
+    marginTop: 2,
+  },
+  originalAmount: {
+    fontSize: 14,
+    color: '#9ca3af',
+    textDecorationLine: 'line-through',
+    marginBottom: 2,
+  },
+  totalAmount: { 
+    fontWeight: 'bold',
+    fontSize: 16,
+    color: '#111827',
+  },
 
   bottomTabs: {
     flexDirection: 'row',
@@ -1271,7 +1731,9 @@ const styles = StyleSheet.create({
     borderBottomWidth: 2,
     borderBottomColor: 'transparent',
   },
-  activeTab: { borderBottomColor: '#2196F3' },
+  activeTab: { 
+    borderBottomColor: '#2196F3' 
+  },
   tabText: { color: '#777' },
   activeTabText: { color: '#2196F3', fontWeight: '600' },
 
@@ -1545,5 +2007,197 @@ const styles = StyleSheet.create({
 
   deleteConfirmButton: {
     backgroundColor: '#ef4444',
+  },
+
+  // Thêm styles mới cho promotion cards
+  // Cập nhật tab styles
+  tab: {
+    flex: 1,
+    padding: 12,
+    alignItems: 'center',
+    borderBottomWidth: 2,
+    borderBottomColor: 'transparent',
+  },
+  activeTab: { 
+    borderBottomColor: '#2196F3' 
+  },
+
+  // Thêm styles cho promotion section
+  promotionSection: {
+    backgroundColor: '#fff',
+    paddingVertical: 16,
+    minHeight: 160,
+  },
+
+  promotionSectionHeader: {
+    paddingHorizontal: 16,
+    marginBottom: 12,
+  },
+
+  promotionSectionTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#111827',
+    marginBottom: 4,
+  },
+
+  promotionSectionSubtitle: {
+    fontSize: 14,
+    color: '#6b7280',
+  },
+
+  promotionList: {
+    paddingHorizontal: 16,
+  },
+
+  promotionCard: {
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 16,
+    width: 280,
+    borderWidth: 2,
+    borderColor: '#e5e7eb',
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.1,
+    shadowRadius: 3,
+    elevation: 3,
+  },
+
+  promotionCardApplied: {
+    borderColor: '#22c55e',
+    backgroundColor: '#f0fdf4',
+  },
+
+  promotionCardDisabled: {
+    opacity: 0.6,
+    backgroundColor: '#f9fafb',
+  },
+
+  promotionHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    marginBottom: 8,
+  },
+
+  promotionCodeContainer: {
+    backgroundColor: '#eff6ff',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+  },
+
+  promotionCode: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#2563eb',
+    letterSpacing: 0.5,
+  },
+
+  promotionCodeApplied: {
+    color: '#16a34a',
+  },
+
+  appliedBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+
+  appliedText: {
+    fontSize: 12,
+    fontWeight: '500',
+    color: '#22c55e',
+  },
+
+  promotionName: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#111827',
+    marginBottom: 6,
+  },
+
+  promotionNameDisabled: {
+    color: '#9ca3af',
+  },
+
+  promotionDescription: {
+    fontSize: 14,
+    color: '#6b7280',
+    lineHeight: 20,
+    marginBottom: 12,
+  },
+
+  promotionDescriptionDisabled: {
+    color: '#d1d5db',
+  },
+
+  promotionFooter: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-end',
+  },
+
+  discountInfo: {
+    flex: 1,
+  },
+
+  discountText: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#dc2626',
+  },
+
+  discountTextDisabled: {
+    color: '#9ca3af',
+  },
+
+  maxAmountText: {
+    fontSize: 12,
+    color: '#6b7280',
+    marginTop: 2,
+  },
+
+  notApplicableBadge: {
+    backgroundColor: '#fee2e2',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+  },
+
+  notApplicableText: {
+    fontSize: 11,
+    fontWeight: '500',
+    color: '#dc2626',
+  },
+
+  noPromotionContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 32,
+  },
+
+  noPromotionText: {
+    fontSize: 16,
+    color: '#9ca3af',
+    marginTop: 8,
+  },
+
+  // Thêm styles cho promotion loading
+  promotionLoadingContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 32,
+  },
+
+  promotionLoadingText: {
+    marginLeft: 8,
+    fontSize: 14,
+    color: '#6b7280',
   },
 });
