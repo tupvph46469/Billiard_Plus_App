@@ -93,6 +93,49 @@ export default function ThanhToanScreen({ navigation, route }) {
       let finalBillCode;
       const methodKey = getPaymentMethodKey(paidBy);
 
+      if (methodKey === 'transfer') {
+        // Chuyển khoản: không đánh dấu paid tại đây, dẫn sang màn QR / poll
+        if (isExistingBill && billId) {
+          // Ensure the bill has paymentMethod set to transfer (not paid)
+          try {
+            await api.patch(`/bills/${billId}`, { paymentMethod: methodKey });
+          } catch (err) {
+            // Not fatal; continue
+            console.warn('Failed to set bill paymentMethod to transfer', err);
+          }
+
+          finalBillId = billId;
+          finalBillCode = billCode || billId;
+
+        } else if (sessionId) {
+          // Create bill from session but keep paid = false so external payment can confirm
+          const checkoutResponse = await sessionService.checkout(sessionId, {
+            endAt: new Date(),
+            paymentMethod: methodKey,
+            paid: false,
+            note: 'Thanh toán chuyển khoản - chờ xác nhận'
+          });
+
+          const createdBill = checkoutResponse.data || checkoutResponse;
+          finalBillId = createdBill._id || createdBill.id;
+          finalBillCode = createdBill.code || finalBillId;
+
+        } else {
+          Alert.alert('Lỗi', 'Không có thông tin hóa đơn để thanh toán');
+          return;
+        }
+
+        // Navigate to QR / transfer payment screen
+        navigation.replace('ThanhToanBank', {
+          billId: finalBillId,
+          billCode: finalBillCode,
+          tableName: actualTableName,
+          need: actualTotalAmount,
+        });
+
+        return;
+      }
+
       if (isExistingBill && billId) {
         // Case 1: Thanh toán bill có sẵn từ PaymentScreen
         await api.patch(`/bills/${billId}/pay`, {

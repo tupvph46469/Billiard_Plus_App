@@ -291,7 +291,7 @@ export default function TableListScreen({ navigation }) {
         style={[
           styles.areaButton,
           isSelected && styles.selectedAreaButton,
-          isSelected && { backgroundColor: item.color || '#fff' }
+          isSelected && { backgroundColor: (item.color || '#ffffff') + '50' } // ✅ Thêm '26' = opacity 15%
         ]}
         onPress={() => handleAreaPress(item)}
       >
@@ -305,7 +305,6 @@ export default function TableListScreen({ navigation }) {
       </TouchableOpacity>
     );
   };
-
   const getTableCardStyle = (status) => {
     switch (status) {
       case 'playing':

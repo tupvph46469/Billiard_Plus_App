@@ -1505,8 +1505,6 @@ export default function OrderDetail({ navigation, route }) {
           <View style={styles.menuBox}>
             {[
               'Yêu cầu thanh toán',
-              'Tạo đơn mới trên bàn này',
-              'Gộp đơn',
               'Hủy đơn',
               'Thay đổi bàn',
             ].map((item, index) => (

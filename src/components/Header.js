@@ -16,9 +16,7 @@ export default function Header({ onMenuPress, onNotificationPress }) {
       <View style={styles.notificationIcon}>
         <TouchableOpacity onPress={onNotificationPress}>
           <Ionicons name="notifications" size={28} color="#333" />
-          <View style={styles.badge}>
-            <Text style={styles.badgeText}>2</Text>
-          </View>
+         
         </TouchableOpacity>
       </View>
     </View>
@@ -43,20 +41,5 @@ const styles = StyleSheet.create({
   notificationIcon: {
     position: "relative",
   },
-  badge: {
-    position: "absolute",
-    right: -5,
-    top: -5,
-    backgroundColor: "#ff4444",
-    borderRadius: 10,
-    width: 20,
-    height: 20,
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  badgeText: {
-    color: "#fff",
-    fontSize: 12,
-    fontWeight: "bold",
-  },
+  
 });
