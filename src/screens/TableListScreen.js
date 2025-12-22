@@ -170,14 +170,9 @@ export default function TableListScreen({ navigation }) {
   // handle navigation focus và refresh data
   useEffect(() => {
     const unsubscribe = navigation.addListener('focus', () => {
-      const state = navigation.getState();
-      const params = state.routes[state.index]?.params;
-      
-      if (params?.refreshData) {
-        console.log('🔄 Refresh data requested from navigation');
-        navigation.setParams({ refreshData: undefined });
-        onRefresh();
-      }
+      console.log('🔄 TableListScreen focused - refreshing data');
+      // Luôn refresh khi focus, không cần check params
+      onRefresh();
     });
 
     return unsubscribe;

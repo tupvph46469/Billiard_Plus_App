@@ -285,10 +285,59 @@ export default function OrderScreen({ navigation, route }) {
     }, 0);
   }, [currentSession]);
 
-  // Xử lý khi nhấn "Tiếp theo"
+  // Sửa lại function createEmptySession - không navigate
+  const createEmptySession = useCallback(async () => {
+    try {
+      console.log('🔓 Creating empty session for table:', tableId);
+
+      if (!tableId) {
+        showToast('❌ Không tìm thấy thông tin bàn. Vui lòng quay lại và chọn bàn lại.', 'error');
+        return;
+      }
+
+      // Tạo session mới
+      const sessionData = {
+        tableId: tableId,
+        startAt: new Date(),
+        note: `Bắt đầu chơi bida`
+      };
+
+      console.log('📤 Creating empty session with data:', sessionData);
+      const sessionResponse = await sessionService.open(sessionData);
+
+      // Backend trả về { data: session, message, status }
+      const newSession = sessionResponse.data;
+
+      console.log('✅ Empty session created:', newSession);
+      setCurrentSession(newSession);
+
+      // Hiển thị toast thành công
+      showToast('Đã bắt đầu phiên chơi');
+
+      // ❌ BỎ: Không chuyển trang, ở lại OrderScreen để có thể gọi thêm đồ
+      // navigation.navigate('OrderDetail', { ... });
+
+    } catch (error) {
+      console.error('❌ Error creating empty session:', error);
+      console.error('❌ Error details:', error.response?.data);
+
+      let errorMessage = 'Không thể bắt đầu phiên chơi';
+      if (error.response?.status === 400) {
+        errorMessage = error.response.data?.message || 'Dữ liệu không hợp lệ';
+      } else if (error.response?.status === 409) {
+        errorMessage = 'Bàn đang có phiên mở rồi';
+      } else if (error.response?.data?.message) {
+        errorMessage = error.response.data.message;
+      }
+
+      showToast(`❌ ${errorMessage}`, 'error');
+    }
+  }, [tableId]); // ✅ SỬA: Bỏ navigation, tableName, ratePerHour khỏi dependencies
+
+  // Sửa lại handleContinue để xử lý cả 2 trường hợp
   const handleContinue = useCallback(() => {
     if (currentSession) {
-      // Chuyển đến OrderDetail với đầy đủ params
+      // Đã có session -> chuyển đến OrderDetail
       navigation.navigate('OrderDetail', {
         sessionId: currentSession._id || currentSession.id,
         tableName: tableName,
@@ -296,10 +345,10 @@ export default function OrderScreen({ navigation, route }) {
         ratePerHour: ratePerHour
       });
     } else {
-      // Hiển thị toast thông báo
-      showToast('ℹ️ Chưa có món nào trong đơn', 'info');
+      // Chưa có session -> tạo phiên mới không có sản phẩm
+      createEmptySession();
     }
-  }, [currentSession, navigation, tableName, tableId, ratePerHour]);
+  }, [currentSession, navigation, tableName, tableId, ratePerHour, createEmptySession]);
 
   // Sửa cart button để dùng toast
   const handleCartPress = () => {
@@ -476,22 +525,37 @@ export default function OrderScreen({ navigation, route }) {
         </View>
       </View>
 
-      {/* Footer tính tiền - chỉ hiện khi có session */}
-      {currentSession && (
-        <View style={styles.footer}>
-          <View style={styles.totalInfo}>
-            <Text style={styles.totalText}>
-              Thành tiền: {getTotalPrice().toLocaleString()}đ
-            </Text>
-            <Text style={styles.itemCount}>
-              Mặt hàng: {getTotalItems()}
-            </Text>
-          </View>
-          <TouchableOpacity style={styles.continueButton} onPress={handleContinue}>
-            <Text style={styles.continueButtonText}>Tiếp theo ›</Text>
-          </TouchableOpacity>
+      {/* Footer - luôn hiển thị, thay đổi text tùy trạng thái */}
+      <View style={styles.footer}>
+        <View style={styles.totalInfo}>
+          {currentSession ? (
+            // Đã có session - hiển thị thông tin đơn hàng
+            <>
+              <Text style={styles.totalText}>
+                Thành tiền: {getTotalPrice().toLocaleString()}đ
+              </Text>
+              <Text style={styles.itemCount}>
+                Mặt hàng: {getTotalItems()}
+              </Text>
+            </>
+          ) : (
+            // Chưa có session - hiển thị thông tin bàn
+            <>
+              <Text style={styles.totalText}>
+                {tableName || 'Bàn billiard'}
+              </Text>
+              <Text style={styles.itemCount}>
+                Giá: {(ratePerHour / 1000).toFixed(0)}k/giờ
+              </Text>
+            </>
+          )}
         </View>
-      )}
+        <TouchableOpacity style={styles.continueButton} onPress={handleContinue}>
+          <Text style={styles.continueButtonText}>
+            {currentSession ? 'Tiếp theo ›' : 'Bắt đầu ▶'}
+          </Text>
+        </TouchableOpacity>
+      </View>
     </SafeAreaView>
   );
 }
