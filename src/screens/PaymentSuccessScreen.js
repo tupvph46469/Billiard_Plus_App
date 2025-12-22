@@ -1,9 +1,8 @@
 import React, { useState, useEffect, useRef } from "react";
-import { View, Text, StyleSheet, TouchableOpacity, Linking, StatusBar, Animated, Alert } from "react-native";
+import { View, Text, StyleSheet, TouchableOpacity, StatusBar, Animated, Alert } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Print from 'expo-print';
-import { shareAsync } from 'expo-sharing';
 
 const currency = (n=0)=> (Number(n)||0).toLocaleString("vi-VN",{style:"currency",currency:"VND",maximumFractionDigits:0});
 
@@ -21,7 +20,18 @@ export default function PaymentSuccessScreen({ route, navigation }) {
     change = 0,
     shouldRefreshTables = false,
     tableName = "Bàn 1",
-    items = [] // Danh sách món (nếu có)
+    items = [],
+    billData,
+    sessionData,
+    startTime,
+    endTime,
+    playingTime = 0,
+    playAmount = 0,
+    serviceAmount = 0,
+    subTotal = 0,
+    billCode,
+    paymentMethod = "Tiền mặt",
+    ratePerHour = 40000
   } = route.params || {};
   
   const [eInvoice, setEInvoice] = useState(false);
@@ -73,7 +83,7 @@ export default function PaymentSuccessScreen({ route, navigation }) {
   }, []);
 
   // Transaction ID và thời gian
-  const transactionId = Math.random().toString(36).substr(2, 9).toUpperCase();
+  const transactionId = billCode || Math.random().toString(36).substr(2, 9).toUpperCase();
   const currentTime = new Date();
   const formattedTime = currentTime.toLocaleString('vi-VN', { 
     hour: '2-digit', 
@@ -83,9 +93,11 @@ export default function PaymentSuccessScreen({ route, navigation }) {
     year: 'numeric'
   });
 
-  // Tạo HTML cho hóa đơn
-  const generateInvoiceHTML = () => {
-    const invoiceDate = currentTime.toLocaleString('vi-VN', {
+  // Format thời gian cho hóa đơn
+  const formatDateTime = (dateString) => {
+    if (!dateString) return 'Không rõ';
+    const date = new Date(dateString);
+    return date.toLocaleString('vi-VN', {
       hour: '2-digit',
       minute: '2-digit',
       second: '2-digit',
@@ -93,223 +105,389 @@ export default function PaymentSuccessScreen({ route, navigation }) {
       month: '2-digit',
       year: 'numeric'
     });
+  };
 
+  // Lấy danh sách items từ billData hoặc items params
+
+const getInvoiceItems = () => {
+  let invoiceItems = [];
+  
+  console.log('🔍 DEBUG getInvoiceItems:', {
+    hasBillData: !!billData,
+    billDataItems: billData?.items?.length,
+    hasItems: !!items,
+    itemsLength: items?.length,
+    hasSessionData: !!sessionData,
+    sessionDataItems: sessionData?.items?.length,
+  });
+  
+  // ✅ Ưu tiên billData (từ bill API response)
+  if (billData?.items && Array.isArray(billData.items) && billData.items.length > 0) {
+    // ✅ FIX: Không filter theo type, lấy tất cả items
+    invoiceItems = billData.items.filter(item => {
+      // Chỉ lọc items có nameSnapshot hoặc name (tức là items thực)
+      return (item.nameSnapshot || item.name || item.productName) && 
+             (item.qty || item.quantity);
+    });
+    console.log('✅ Using billData.items:', invoiceItems.length);
+  } 
+  // ✅ Fallback sang items params (từ ThanhToanScreen)
+  else if (items && Array.isArray(items) && items.length > 0) {
+    invoiceItems = items.filter(item => {
+      return (item.nameSnapshot || item.name || item.productName) && 
+             (item.qty || item.quantity);
+    });
+    console.log('✅ Using items param:', invoiceItems.length);
+  }
+  // ✅ Fallback sang sessionData
+  else if (sessionData?.items && Array.isArray(sessionData.items) && sessionData.items.length > 0) {
+    invoiceItems = sessionData.items
+      .filter(item => (item.nameSnapshot || item.name) && (item.qty || item.quantity))
+      .map(item => ({
+        type: 'product',
+        nameSnapshot: item.nameSnapshot || item.name || 'Sản phẩm',
+        priceSnapshot: item.priceSnapshot || item.price || 0,
+        qty: item.qty || item.quantity || 1,
+        note: item.note || ''
+      }));
+    console.log('✅ Using sessionData.items:', invoiceItems.length);
+  }
+  
+  console.log('📋 Final invoice items:', invoiceItems.length, invoiceItems);
+  return invoiceItems;
+};
+
+  // Tạo HTML cho hóa đơn với dữ liệu thật
+  const generateInvoiceHTML = () => {
+    const invoiceDate = formatDateTime(endTime);
+    const invoiceStartTime = formatDateTime(startTime);
+    const invoiceItems = getInvoiceItems();
+  
+    console.log('📄 Generating HTML with:', {
+      items: invoiceItems.length,
+      playAmount,
+      serviceAmount,
+      total: need,
+      hasItems: invoiceItems && invoiceItems.length > 0
+    });
+  
+    // ✅ Xử lý items
+    const itemsHTML = (invoiceItems && invoiceItems.length > 0)
+      ? invoiceItems.map((item, index) => {
+          try {
+            const itemName = item?.nameSnapshot || item?.name || item?.productName || 'Sản phẩm';
+            const itemQty = item?.qty || item?.quantity || 1;
+            // ✅ FIX: Nếu priceSnapshot = 0, vẫn cần hiển thị
+            const itemPrice = item?.priceSnapshot || item?.price || 0;
+            const itemTotal = itemPrice * itemQty;
+            
+            console.log(`📦 Item ${index + 1}:`, { 
+              itemName, 
+              itemQty, 
+              itemPrice,
+              itemTotal,
+              note: item?.note
+            });
+            
+            return `
+              <tr>
+                <td style="padding: 6px 0; border-bottom: 1px solid #f0f0f0;">
+                  ${itemName}${item?.note ? ` <span style="color: #999; font-size: 12px;">(${item.note})</span>` : ''}
+                </td>
+                <td style="text-align: center; padding: 6px 0; border-bottom: 1px solid #f0f0f0;">${itemQty}</td>
+                <td style="text-align: right; padding: 6px 0; border-bottom: 1px solid #f0f0f0;">${itemPrice.toLocaleString()}đ</td>
+                <td style="text-align: right; padding: 6px 0; border-bottom: 1px solid #f0f0f0; font-weight: 600;">${itemTotal.toLocaleString()}đ</td>
+              </tr>
+            `;
+          } catch (error) {
+            console.error(`❌ Error processing item ${index}:`, error, item);
+            return '';
+          }
+        }).join('')
+      : '';
+  
+    // ✅ Cảnh báo nếu không có items
+    if (!invoiceItems || invoiceItems.length === 0) {
+      console.warn('⚠️ No items found - showing charges only');
+    }
+  
     return `
-<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <style>
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    body {
-      font-family: 'Courier New', monospace;
-      padding: 20px;
-      max-width: 400px;
-      margin: 0 auto;
-      font-size: 14px;
-      line-height: 1.5;
-    }
-    .header {
-      text-align: center;
-      border-bottom: 2px dashed #333;
-      padding-bottom: 15px;
-      margin-bottom: 15px;
-    }
-    .store-name {
-      font-size: 20px;
-      font-weight: bold;
-      margin-bottom: 5px;
-      text-transform: uppercase;
-    }
-    .store-info {
-      font-size: 12px;
-      color: #555;
-    }
-    .invoice-title {
-      font-size: 18px;
-      font-weight: bold;
-      text-align: center;
-      margin: 15px 0;
-      text-transform: uppercase;
-    }
-    .info-row {
-      display: flex;
-      justify-content: space-between;
-      margin: 8px 0;
-      font-size: 13px;
-    }
-    .info-label {
-      font-weight: 600;
-    }
-    .divider {
-      border-top: 1px dashed #333;
-      margin: 15px 0;
-    }
-    .thick-divider {
-      border-top: 2px dashed #333;
-      margin: 15px 0;
-    }
-    .items-section {
-      margin: 15px 0;
-    }
-    .item-row {
-      display: flex;
-      justify-content: space-between;
-      margin: 5px 0;
-      font-size: 13px;
-    }
-    .total-section {
-      margin-top: 15px;
-    }
-    .total-row {
-      display: flex;
-      justify-content: space-between;
-      margin: 8px 0;
-      font-size: 14px;
-    }
-    .total-row.highlight {
-      font-weight: bold;
-      font-size: 16px;
-      margin-top: 10px;
-    }
-    .footer {
-      text-align: center;
-      margin-top: 20px;
-      padding-top: 15px;
-      border-top: 2px dashed #333;
-      font-size: 12px;
-    }
-    .thank-you {
-      font-weight: bold;
-      margin-bottom: 5px;
-    }
-  </style>
-</head>
-<body>
-  <!-- Header -->
-  <div class="header">
-    <div class="store-name">${STORE_INFO.name}</div>
-    <div class="store-info">${STORE_INFO.address}</div>
-    <div class="store-info">SĐT: ${STORE_INFO.phone}</div>
-  </div>
-
-  <!-- Invoice Title -->
-  <div class="invoice-title">Hóa Đơn Bàn 10</div>
-
-  <!-- Invoice Info -->
-  <div class="info-row">
-    <span class="info-label">Mã GD:</span>
-    <span>#${transactionId}</span>
-  </div>
-  <div class="info-row">
-    <span class="info-label">Bàn:</span>
-    <span>${tableName}</span>
-  </div>
-  <div class="info-row">
-    <span class="info-label">Giờ bắt đầu:</span>
-    <span>20:37 13/12/2017</span>
-  </div>
-  <div class="info-row">
-    <span class="info-label">Giờ kết thúc:</span>
-    <span>${invoiceDate}</span>
-  </div>
-
-  <div class="thick-divider"></div>
-
-  <!-- Items Section -->
-  <div class="items-section">
-    <table style="width: 100%; border-collapse: collapse;">
-      <thead>
-        <tr style="border-bottom: 1px solid #333;">
-          <th style="text-align: left; padding: 8px 0; font-size: 13px;">Tên</th>
-          <th style="text-align: center; padding: 8px 0; font-size: 13px;">SL</th>
-          <th style="text-align: right; padding: 8px 0; font-size: 13px;">Giá</th>
-          <th style="text-align: right; padding: 8px 0; font-size: 13px;">Tổng</th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr>
-          <td style="padding: 5px 0;">Bia Larue -Lon</td>
-          <td style="text-align: center; padding: 5px 0;">20</td>
-          <td style="text-align: right; padding: 5px 0;">12.000</td>
-          <td style="text-align: right; padding: 5px 0;">240.000</td>
-        </tr>
-        <tr>
-          <td style="padding: 5px 0;">Nước Bò Húc</td>
-          <td style="text-align: center; padding: 5px 0;">4</td>
-          <td style="text-align: right; padding: 5px 0;">15.000</td>
-          <td style="text-align: right; padding: 5px 0;">60.000</td>
-        </tr>
-        <tr>
-          <td style="padding: 5px 0;">-Chai</td>
-          <td style="text-align: center; padding: 5px 0;"></td>
-          <td style="text-align: right; padding: 5px 0;"></td>
-          <td style="text-align: right; padding: 5px 0;"></td>
-        </tr>
-        <tr>
-          <td style="padding: 5px 0;">Thuốc Ngựa -Gói</td>
-          <td style="text-align: center; padding: 5px 0;">1</td>
-          <td style="text-align: right; padding: 5px 0;">30.000</td>
-          <td style="text-align: right; padding: 5px 0;">30.000</td>
-        </tr>
-        <tr>
-          <td style="padding: 5px 0;">Cafe Sữa Đá -Ly</td>
-          <td style="text-align: center; padding: 5px 0;">1</td>
-          <td style="text-align: right; padding: 5px 0;">15.000</td>
-          <td style="text-align: right; padding: 5px 0;">15.000</td>
-        </tr>
-      </tbody>
-    </table>
-  </div>
-
-  <div class="divider"></div>
-
-  <!-- Total Section -->
-  <div class="total-section">
-    <div class="total-row">
-      <span>Tổng dịch vụ:</span>
-      <span>345.000</span>
-    </div>
-    <div class="total-row">
-      <span>Tổng tiền giờ:</span>
-      <span>25.000</span>
-    </div>
-    <div class="total-row highlight">
-      <span>Thanh toán:</span>
-      <span>${currency(need)}</span>
-    </div>
-  </div>
-
-  <div class="thick-divider"></div>
-
-  <!-- Payment Details -->
-  <div class="total-row">
-    <span>Tiền khách trả:</span>
-    <span>${currency(paid)}</span>
-  </div>
-  <div class="total-row">
-    <span>Tiền thừa:</span>
-    <span>${currency(change)}</span>
-  </div>
-
-  <!-- Footer -->
-  <div class="footer">
-    <div class="thank-you">Cảm ơn quý khách!</div>
-    <div>Hẹn gặp lại</div>
-    <div style="margin-top: 10px; font-size: 11px;">
-      Giá giờ: 30.000 đ/giờ
-    </div>
-  </div>
-</body>
-</html>
-    `;
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+          font-family: 'Courier New', 'Roboto', monospace;
+          padding: 24px;
+          max-width: 420px;
+          margin: 0 auto;
+          font-size: 15px;
+          line-height: 1.6;
+          color: #1a1a1a;
+        }
+        
+        .header {
+          text-align: center;
+          border-bottom: 2px dashed #333;
+          padding-bottom: 16px;
+          margin-bottom: 16px;
+        }
+        
+        .store-name {
+          font-size: 24px;
+          font-weight: bold;
+          margin-bottom: 6px;
+          text-transform: uppercase;
+          letter-spacing: 1px;
+        }
+        
+        .store-info {
+          font-size: 13px;
+          color: #555;
+          line-height: 1.8;
+        }
+        
+        .invoice-title {
+          font-size: 20px;
+          font-weight: bold;
+          text-align: center;
+          margin: 16px 0;
+          text-transform: uppercase;
+          letter-spacing: 0.5px;
+        }
+        
+        .info-row {
+          display: flex;
+          justify-content: space-between;
+          margin: 10px 0;
+          font-size: 14px;
+          line-height: 1.5;
+        }
+        
+        .info-label {
+          font-weight: 600;
+          color: #555;
+        }
+        
+        .info-value {
+          font-weight: 600;
+          color: #1a1a1a;
+          text-align: right;
+        }
+        
+        .divider {
+          border-top: 1px dashed #999;
+          margin: 16px 0;
+        }
+        
+        .thick-divider {
+          border-top: 2px dashed #333;
+          margin: 16px 0;
+        }
+        
+        .items-section {
+          margin: 16px 0;
+        }
+        
+        .items-table {
+          width: 100%;
+          border-collapse: collapse;
+          font-size: 14px;
+        }
+        
+        .items-table thead {
+          border-bottom: 2px solid #333;
+        }
+        
+        .items-table th {
+          padding: 10px 0;
+          font-weight: 700;
+          text-transform: uppercase;
+          font-size: 12px;
+          letter-spacing: 0.5px;
+        }
+        
+        .items-table th:first-child {
+          text-align: left;
+        }
+        
+        .items-table th:nth-child(2) {
+          text-align: center;
+        }
+        
+        .items-table th:nth-child(3),
+        .items-table th:nth-child(4) {
+          text-align: right;
+        }
+        
+        .total-section {
+          margin-top: 16px;
+        }
+        
+        .total-row {
+          display: flex;
+          justify-content: space-between;
+          margin: 10px 0;
+          font-size: 15px;
+          line-height: 1.5;
+        }
+        
+        .total-row.highlight {
+          font-weight: bold;
+          font-size: 18px;
+          margin-top: 12px;
+          padding-top: 12px;
+          border-top: 2px solid #333;
+        }
+        
+        .total-row.highlight .total-label {
+          text-transform: uppercase;
+          letter-spacing: 0.5px;
+        }
+        
+        .footer {
+          text-align: center;
+          margin-top: 24px;
+          padding-top: 16px;
+          border-top: 2px dashed #333;
+          font-size: 13px;
+        }
+        
+        .thank-you {
+          font-weight: bold;
+          font-size: 16px;
+          margin-bottom: 8px;
+          text-transform: uppercase;
+        }
+        
+        .rate-info {
+          margin-top: 12px;
+          font-size: 12px;
+          color: #666;
+          font-style: italic;
+        }
+    
+        .empty-notice {
+          text-align: center;
+          padding: 16px;
+          background-color: #fffbeb;
+          border-left: 4px solid #fbbf24;
+          border-radius: 4px;
+          margin: 12px 0;
+          font-size: 13px;
+          color: #92400e;
+        }
+      </style>
+    </head>
+    <body>
+      <!-- Header -->
+      <div class="header">
+        <div class="store-name">${STORE_INFO.name}</div>
+        <div class="store-info">${STORE_INFO.address}</div>
+        <div class="store-info">SĐT: ${STORE_INFO.phone}</div>
+      </div>
+    
+      <!-- Invoice Title -->
+      <div class="invoice-title">Hóa Đơn ${tableName}</div>
+    
+      <!-- Invoice Info -->
+      <div class="info-row">
+        <span class="info-label">Mã GD:</span>
+        <span class="info-value">#${transactionId}</span>
+      </div>
+      <div class="info-row">
+        <span class="info-label">Bàn:</span>
+        <span class="info-value">${tableName}</span>
+      </div>
+      <div class="info-row">
+        <span class="info-label">Giờ bắt đầu:</span>
+        <span class="info-value">${invoiceStartTime}</span>
+      </div>
+      <div class="info-row">
+        <span class="info-label">Giờ kết thúc:</span>
+        <span class="info-value">${invoiceDate}</span>
+      </div>
+    
+      <div class="thick-divider"></div>
+    
+      <!-- Items Section -->
+      ${invoiceItems && invoiceItems.length > 0 ? `
+      <div class="items-section">
+        <table class="items-table">
+          <thead>
+            <tr>
+              <th>Tên</th>
+              <th>SL</th>
+              <th>Giá</th>
+              <th>Tổng</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${itemsHTML}
+          </tbody>
+        </table>
+      </div>
+      ` : '<div class="empty-notice">Không có dịch vụ F&B - Chỉ tính tiền giờ chơi</div>'}
+    
+      <div class="divider"></div>
+    
+      <!-- Total Section -->
+      <div class="total-section">
+        ${playAmount > 0 ? `
+        <div class="total-row">
+          <span>Tiền giờ chơi (${playingTime} phút):</span>
+          <span style="font-weight: 600;">${playAmount.toLocaleString()}đ</span>
+        </div>
+        ` : ''}
+        
+        ${serviceAmount > 0 ? `
+        <div class="total-row">
+          <span>Tiền dịch vụ:</span>
+          <span style="font-weight: 600;">${serviceAmount.toLocaleString()}đ</span>
+        </div>
+        ` : ''}
+        
+        <div class="total-row highlight">
+          <span class="total-label">Thanh toán:</span>
+          <span>${currency(need)}</span>
+        </div>
+      </div>
+    
+      <div class="thick-divider"></div>
+    
+      <!-- Payment Details -->
+      <div class="total-row">
+        <span>Tiền khách trả:</span>
+        <span style="font-weight: 600;">${currency(paid)}</span>
+      </div>
+      <div class="total-row">
+        <span>Tiền thừa:</span>
+        <span style="font-weight: 600; color: #16a34a;">${currency(change)}</span>
+      </div>
+      <div class="total-row">
+        <span>Phương thức:</span>
+        <span style="font-weight: 600;">${paymentMethod}</span>
+      </div>
+    
+      <!-- Footer -->
+      <div class="footer">
+        <div class="thank-you">Cảm ơn quý khách!</div>
+        <div>Hẹn gặp lại</div>
+        <div class="rate-info">
+          Giá giờ: ${ratePerHour.toLocaleString()}đ/giờ
+        </div>
+      </div>
+    </body>
+    </html>
+      `;
   };
 
   // Xử lý xuất hóa đơn PDF
   const handlePrintInvoice = async () => {
     if (!eInvoice) {
-      // Nếu chưa check vào checkbox, hiển thị thông báo
       Alert.alert(
         'Thông báo',
         'Vui lòng chọn "Xuất hóa đơn điện tử" để tạo hóa đơn PDF',
@@ -323,6 +501,8 @@ export default function PaymentSuccessScreen({ route, navigation }) {
 
       // Tạo HTML cho hóa đơn
       const html = generateInvoiceHTML();
+      
+
 
       // Tạo PDF
       const { uri } = await Print.printToFileAsync({ 
@@ -332,16 +512,14 @@ export default function PaymentSuccessScreen({ route, navigation }) {
 
       console.log('✅ PDF đã tạo tại:', uri);
 
-      // Hiển thị preview PDF (tự động mở)
+      // Hiển thị preview PDF
       await Print.printAsync({ 
         uri,
-        // Không cần máy in thật, chỉ hiển thị preview
       });
 
       console.log('✅ Đã hiển thị PDF preview');
 
       // Sau khi đóng PDF preview, tự động quay về trang chủ
-      // Delay nhỏ để đảm bảo PDF preview đã đóng hoàn toàn
       setTimeout(() => {
         handleComplete();
       }, 500);
@@ -377,13 +555,10 @@ export default function PaymentSuccessScreen({ route, navigation }) {
     }
   };
 
-  // Xử lý nút "Hoàn tất thanh toán"
   const handleCompletePayment = () => {
     if (eInvoice) {
-      // Nếu đã check xuất hóa đơn, gọi hàm xuất PDF
       handlePrintInvoice();
     } else {
-      // Nếu không xuất hóa đơn, hoàn tất luôn
       handleComplete();
     }
   };

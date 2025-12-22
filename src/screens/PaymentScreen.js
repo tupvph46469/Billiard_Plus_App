@@ -109,37 +109,55 @@ export default function PaymentScreen({ navigation }) {
     });
   };
 
-  const handlePayment = async (bill) => {
-    try {
-      // Chuyển đến ThanhToanScreen với thông tin bill
-      navigation.navigate('ThanhToan', { 
-        // Thông tin từ bill
-        billId: bill.id,
-        billData: bill.originalBill,
-        
-        // Thông tin cần thiết cho ThanhToanScreen
-        sessionId: bill.originalBill?.session?.id || bill.originalBill?.sessionId,
-        tableName: bill.tableName,
-        tableId: bill.originalBill?.table?.id || bill.originalBill?.tableId,
-        totalAmount: bill.total,
-        
-        // Thông tin bổ sung
-        playAmount: bill.playAmount,
-        serviceAmount: bill.serviceAmount,
-        subTotal: bill.subTotal,
-        paymentMethod: bill.paymentMethod,
-        billCode: bill.code,
-        
-        // Flag để biết đây là thanh toán bill có sẵn
-        isExistingBill: true
-      });
-      
-    } catch (error) {
-      console.error('❌ Error navigating to payment:', error);
-      Alert.alert('Lỗi', 'Không thể mở màn hình thanh toán');
-    }
-  };
+// PATCH cho PaymentScreen.js
 
+const handlePayment = async (bill) => {
+  try {
+    console.log('💳 Processing payment for bill:', bill.id);
+    
+    // ✅ Extract items từ bill
+    let billItems = [];
+    if (bill.originalBill?.items && Array.isArray(bill.originalBill.items)) {
+      billItems = bill.originalBill.items;
+    }
+    
+    console.log('📦 Bill items found:', billItems.length, billItems);
+    
+    // Chuyển đến ThanhToanScreen với thông tin bill
+    navigation.navigate('ThanhToan', { 
+      // Thông tin từ bill
+      billId: bill.id,
+      billData: bill.originalBill,
+      
+      // Thông tin cần thiết cho ThanhToanScreen
+      sessionId: bill.originalBill?.session?.id || bill.originalBill?.sessionId,
+      tableName: bill.tableName,
+      tableId: bill.originalBill?.table?.id || bill.originalBill?.tableId,
+      totalAmount: bill.total,
+      
+      // ⭐ CRITICAL: Truyền items
+      items: billItems,
+      
+      // Thông tin bổ sung
+      playAmount: bill.playAmount,
+      serviceAmount: bill.serviceAmount,
+      subTotal: bill.subTotal,
+      paymentMethod: bill.paymentMethod,
+      billCode: bill.code,
+      
+      // Thời gian
+      startTime: bill.originalBill?.startTime,
+      endTime: bill.originalBill?.endTime,
+      
+      // Flag để biết đây là thanh toán bill có sẵn
+      isExistingBill: true
+    });
+    
+  } catch (error) {
+    console.error('❌ Error navigating to payment:', error);
+    Alert.alert('Lỗi', 'Không thể mở màn hình thanh toán');
+  }
+};
   const renderBillCard = (bill, index) => {
     return (
       <View

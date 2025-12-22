@@ -75,12 +75,12 @@ export default function ThanhToanScreen({ navigation, route }) {
       // Kiểm tra thông tin cần thiết
       if (!actualTotalAmount || actualTotalAmount <= 0) {
         Alert.alert('Lỗi', 'Không tìm thấy thông tin số tiền thanh toán hợp lệ');
+
         return;
       }
-
-      let paidAmount = actualTotalAmount; // Mặc định bằng tổng hóa đơn
-
-      // Chỉ kiểm tra tiền khách trả nếu là thanh toán tiền mặt
+  
+      let paidAmount = actualTotalAmount;
+  
       if (isCashPayment) {
         paidAmount = Number(customerCash) || 0;
         if (paidAmount < actualTotalAmount) {
@@ -88,9 +88,10 @@ export default function ThanhToanScreen({ navigation, route }) {
           return;
         }
       }
-
+  
       let finalBillId;
       let finalBillCode;
+      let finalBillData = null;
       const methodKey = getPaymentMethodKey(paidBy);
 
       if (methodKey === 'transfer') {
@@ -136,8 +137,9 @@ export default function ThanhToanScreen({ navigation, route }) {
         return;
       }
 
+
       if (isExistingBill && billId) {
-        // Case 1: Thanh toán bill có sẵn từ PaymentScreen
+        // Case 1: Thanh toán bill có sẵn
         await api.patch(`/bills/${billId}/pay`, {
           paymentMethod: methodKey
         });
@@ -145,41 +147,94 @@ export default function ThanhToanScreen({ navigation, route }) {
         finalBillId = billId;
         finalBillCode = billCode || billId;
         
+        // Load lại bill data sau khi thanh toán
+        const billResponse = await api.get(`/bills/${billId}`);
+        finalBillData = billResponse.data?.data || billResponse.data;
+        
       } else if (sessionId) {
-        // Case 2: Tạo bill mới từ session (OrderDetail)
+        // Case 2: Tạo bill mới từ session
         const checkoutResponse = await sessionService.checkout(sessionId, {
           endAt: new Date(),
           paymentMethod: methodKey,
           paid: true,
           note: 'Thanh toán trực tiếp'
         });
-
+  
         const createdBill = checkoutResponse.data || checkoutResponse;
         finalBillId = createdBill._id || createdBill.id;
         finalBillCode = createdBill.code || finalBillId;
+        finalBillData = createdBill;
         
       } else {
         Alert.alert('Lỗi', 'Không có thông tin hóa đơn để thanh toán');
         return;
       }
-
-      // ✅ THÊM: Chuẩn bị params cho success screen với refreshData
+  
+      // ✅ FIX: Extract items một cách an toàn
+      let extractedItems = [];
+      
+      // Thử lấy từ finalBillData trước
+      if (finalBillData?.items && Array.isArray(finalBillData.items)) {
+        extractedItems = finalBillData.items;
+      }
+      // Fallback sang billData từ params
+      else if (billData?.items && Array.isArray(billData.items)) {
+        extractedItems = billData.items;
+      }
+      // Fallback sang sessionData
+      else if (sessionData?.items && Array.isArray(sessionData.items)) {
+        extractedItems = sessionData.items;
+      }
+  
+      console.log('📦 Extracted items for invoice:', extractedItems.length, extractedItems);
+  
+      // ✅ Chuẩn bị đầy đủ params cho success screen
       const successParams = {
-        sessionId: sessionId || 'completed',
-        billId: finalBillId,
-        tableName: actualTableName,
-        area: "Khu vực 1",
+        // Thông tin thanh toán
         need: actualTotalAmount,
         paid: paidAmount,
         change: Math.max(paidAmount - actualTotalAmount, 0),
+        
+        // Thông tin bàn & session
+        tableName: actualTableName,
+        sessionId: sessionId,
+        tableId: tableId,
+        billId: finalBillId,
         billCode: finalBillCode,
-        // ✅ THÊM: Flag để báo success screen cần refresh table data
+        
+        // ⭐ CRITICAL: Truyền đầy đủ dữ liệu
+        billData: finalBillData,
+        sessionData: sessionData,
+        items: extractedItems, // ✅ Items đã được extract
+        
+        // Thời gian
+        startTime: finalBillData?.startTime || sessionData?.startTime,
+        endTime: finalBillData?.endTime || new Date().toISOString(),
+        playingTime: playingTime,
+        
+        // Tổng tiền chi tiết
+        playAmount: finalBillData?.playAmount || playAmount || 0,
+        serviceAmount: finalBillData?.serviceAmount || serviceAmount || 0,
+        subTotal: finalBillData?.subTotal || subTotal || actualTotalAmount,
+        
+        // Phương thức thanh toán
+        paymentMethod: paidBy,
+        
+        // Rate
+        ratePerHour: ratePerHour || 40000,
+        
+        // Flags
         shouldRefreshTables: true
       };
-
+  
+      console.log('✅ Navigating to success with params:', {
+        ...successParams,
+        itemsCount: successParams.items.length
+      });
+  
       // Chuyển tới màn thành công
       navigation.replace("ThanhToanSuccess", successParams);
-
+  
     } catch (error) {
       console.error('❌ Payment error:', error);
       let errorMessage = 'Không thể xử lý thanh toán';
