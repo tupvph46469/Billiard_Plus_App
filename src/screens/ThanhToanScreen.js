@@ -67,10 +67,21 @@ export default function ThanhToanScreen({ navigation, route }) {
   // Kiểm tra xem có phải phương thức tiền mặt không
   const isCashPayment = paidBy === "Tiền mặt";
 
-  // ✅ SỬA: Logic xử lý thanh toán với validation
+  // ✅ SỬA: Logic xử lý thanh toán với validation và debug logs
   const handlePayment = async () => {
     try {
       setProcessing(true);
+      
+      console.log('💳 [ThanhToan] ===== PAYMENT DEBUG =====');
+      console.log('💳 [ThanhToan] Params received:', { 
+        sessionId, 
+        totalAmount, 
+        originalAmount, 
+        discount, 
+        appliedPromotions,
+        isExistingBill,
+        billId 
+      });
       
       // Kiểm tra thông tin cần thiết
       if (!actualTotalAmount || actualTotalAmount <= 0) {
@@ -92,6 +103,10 @@ export default function ThanhToanScreen({ navigation, route }) {
       let finalBillId;
       let finalBillCode;
       const methodKey = getPaymentMethodKey(paidBy);
+
+      console.log('💳 [ThanhToan] Payment method:', methodKey);
+      console.log('💳 [ThanhToan] Paid amount:', paidAmount);
+      console.log('💳 [ThanhToan] Total amount:', actualTotalAmount);
 
       if (methodKey === 'transfer') {
         // Chuyển khoản: không đánh dấu paid tại đây, dẫn sang màn QR / poll
@@ -137,6 +152,8 @@ export default function ThanhToanScreen({ navigation, route }) {
       }
 
       if (isExistingBill && billId) {
+        console.log('💳 [ThanhToan] Paying existing bill:', billId);
+        
         // Case 1: Thanh toán bill có sẵn từ PaymentScreen
         await api.patch(`/bills/${billId}/pay`, {
           paymentMethod: methodKey
@@ -146,55 +163,117 @@ export default function ThanhToanScreen({ navigation, route }) {
         finalBillCode = billCode || billId;
         
       } else if (sessionId) {
+        console.log('💳 [ThanhToan] Creating bill from session:', sessionId);
+        
+        // ✅ SỬA: Chuyển promotions thành discountLines theo format backend
+        const discountLines = [];
+        
+        if (appliedPromotions && appliedPromotions.length > 0) {
+          appliedPromotions.forEach(promotion => {
+            const discountLine = {
+              name: `${promotion.name} (${promotion.code})`,
+              type: promotion.discountType === 'percent' ? 'percent' : 'value',
+              value: promotion.discountValue,
+              amount: promotion.discountType === 'percent' 
+                ? Math.min((actualOriginalAmount * promotion.discountValue) / 100, promotion.maxAmount || Infinity)
+                : promotion.discountValue,
+              meta: {
+                promotionId: promotion.id,
+                code: promotion.code,
+                applyTo: promotion.applyTo,
+                maxAmount: promotion.maxAmount,
+                stackable: promotion.stackable
+              }
+            };
+            
+            console.log('🎁 [ThanhToan - DiscountLine]:', discountLine);
+            discountLines.push(discountLine);
+          });
+        }
+
         // Case 2: Tạo bill mới từ session (OrderDetail)
-        const checkoutResponse = await sessionService.checkout(sessionId, {
+        const checkoutPayload = {
           endAt: new Date(),
+          discountLines: discountLines, // ✅ Đúng field name
+          surcharge: 0,
           paymentMethod: methodKey,
           paid: true,
-          note: 'Thanh toán trực tiếp'
-        });
+          note: appliedPromotions && appliedPromotions.length > 0 
+            ? `Thanh toán trực tiếp - Áp dụng KM: ${appliedPromotions.map(p => p.code).join(', ')}`
+            : 'Thanh toán trực tiếp'
+        };
 
-        const createdBill = checkoutResponse.data || checkoutResponse;
+        console.log('💳 [ThanhToan] Checkout payload:', JSON.stringify(checkoutPayload, null, 2));
+
+        const checkoutResponse = await sessionService.checkout(sessionId, checkoutPayload);
+        
+        console.log('💳 [ThanhToan] Checkout response:', JSON.stringify(checkoutResponse, null, 2));
+
+        const createdBill = checkoutResponse.data?.bill || checkoutResponse.data || checkoutResponse;
         finalBillId = createdBill._id || createdBill.id;
         finalBillCode = createdBill.code || finalBillId;
+        
+        // Kiểm tra bill total
+        const createdBillTotal = createdBill.total;
+        const billDiscounts = createdBill.discounts || [];
+        
+        console.log('💰 [ThanhToan] Created bill total:', createdBillTotal);
+        console.log('💰 [ThanhToan] Bill discounts:', billDiscounts);
+        console.log('💰 [ThanhToan] Expected total:', actualTotalAmount);
+        
+        // Validation kết quả
+        if (billDiscounts.length > 0) {
+          console.log('✅ [ThanhToan] Backend applied discounts successfully!');
+        } else {
+          console.warn('⚠️ [ThanhToan] No discounts in created bill');
+        }
+
+        if (Math.abs(createdBillTotal - actualTotalAmount) < 1000) {
+          console.log('✅ [ThanhToan] Total matches expected amount!');
+        } else {
+          console.warn('⚠️ [ThanhToan] Total mismatch');
+          console.warn('⚠️ [ThanhToan] Backend:', createdBillTotal, '- Expected:', actualTotalAmount);
+        }
         
       } else {
         Alert.alert('Lỗi', 'Không có thông tin hóa đơn để thanh toán');
         return;
       }
 
-      // ✅ THÊM: Chuẩn bị params cho success screen với refreshData
-      const successParams = {
-        sessionId: sessionId || 'completed',
-        billId: finalBillId,
-        tableName: actualTableName,
-        area: "Khu vực 1",
-        need: actualTotalAmount,
-        paid: paidAmount,
-        change: Math.max(paidAmount - actualTotalAmount, 0),
-        billCode: finalBillCode,
-        // ✅ THÊM: Flag để báo success screen cần refresh table data
-        shouldRefreshTables: true
-      };
+    // ✅ THÊM: Chuẩn bị params cho success screen với refreshData
+    const successParams = {
+      sessionId: sessionId || 'completed',
+      billId: finalBillId,
+      tableName: actualTableName,
+      area: "Khu vực 1",
+      need: actualTotalAmount,
+      paid: paidAmount,
+      change: Math.max(paidAmount - actualTotalAmount, 0),
+      billCode: finalBillCode,
+      // ✅ THÊM: Flag để báo success screen cần refresh table data
+      shouldRefreshTables: true
+    };
 
-      // Chuyển tới màn thành công
-      navigation.replace("ThanhToanSuccess", successParams);
+    // Chuyển tới màn thành công
+    navigation.replace("ThanhToanSuccess", successParams);
 
-    } catch (error) {
-      console.error('❌ Payment error:', error);
-      let errorMessage = 'Không thể xử lý thanh toán';
-      if (error.response?.status === 400) {
-        errorMessage = 'Thông tin thanh toán không hợp lệ';
-      } else if (error.response?.status === 404) {
-        errorMessage = 'Không tìm thấy hóa đơn';
-      } else if (error.response?.data?.message) {
-        errorMessage = error.response.data.message;
-      }
-      
-      Alert.alert('Lỗi thanh toán', errorMessage);
-    } finally {
-      setProcessing(false);
+  } catch (error) {
+    console.error('❌ Payment error:', error);
+    console.error('❌ Payment error response:', error.response?.data);
+    
+    let errorMessage = 'Không thể xử lý thanh toán';
+    if (error.response?.status === 400) {
+      errorMessage = 'Thông tin thanh toán không hợp lệ';
+    } else if (error.response?.status === 404) {
+      errorMessage = 'Không tìm thấy hóa đơn';
+    } else if (error.response?.data?.message) {
+      errorMessage = error.response.data.message;
     }
+    
+    Alert.alert('Lỗi thanh toán', errorMessage);
+  } finally {
+    setProcessing(false);
+  }
   };
 
   // ✅ SỬA: Tính toán các giá trị với validation

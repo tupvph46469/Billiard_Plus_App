@@ -524,7 +524,7 @@ export default function OrderDetail({ navigation, route }) {
     showToast(`Đã áp dụng khuyến mãi ${promotion.code}`);
   }, [appliedPromotions]);
 
-  // Render promotion item trong horizontal scroll
+  // Render promotion item trong horizontal scroll - SỬA: Compact hơn
   const renderPromotionItem = ({ item }) => {
     const isApplied = appliedPromotions.some(p => p.id === item.id);
     const canApply = item.applicable && !isApplied;
@@ -541,20 +541,15 @@ export default function OrderDetail({ navigation, route }) {
       >
         {/* Header với mã và trạng thái */}
         <View style={styles.promotionHeader}>
-          <View style={styles.promotionCodeContainer}>
-            <Text style={[
-              styles.promotionCode,
-              isApplied && styles.promotionCodeApplied
-            ]}>
-              {item.code}
-            </Text>
-          </View>
+          <Text style={[
+            styles.promotionCode,
+            isApplied && styles.promotionCodeApplied
+          ]}>
+            {item.code}
+          </Text>
           
           {isApplied && (
-            <View style={styles.appliedBadge}>
-              <Ionicons name="checkmark-circle" size={16} color="#22c55e" />
-              <Text style={styles.appliedText}>Đã áp dụng</Text>
-            </View>
+            <Ionicons name="checkmark-circle" size={14} color="#22c55e" />
           )}
         </View>
 
@@ -566,57 +561,39 @@ export default function OrderDetail({ navigation, route }) {
           {item.name}
         </Text>
 
-        {/* Mô tả */}
-        <Text style={[
-          styles.promotionDescription,
-          !item.applicable && styles.promotionDescriptionDisabled
-        ]} numberOfLines={2}>
-          {item.description}
-        </Text>
-
         {/* Footer với loại giảm giá */}
         <View style={styles.promotionFooter}>
-          <View style={styles.discountInfo}>
-            <Text style={[
-              styles.discountText,
-              !item.applicable && styles.discountTextDisabled
-            ]}>
-              {item.discountType === 'percent' 
-                ? `Giảm ${item.discountValue}%` 
-                : `Giảm ${item.discountValue.toLocaleString()}đ`
-              }
-            </Text>
-            {item.maxAmount && item.discountType === 'percent' && (
-              <Text style={styles.maxAmountText}>
-                (Tối đa {item.maxAmount.toLocaleString()}đ)
-              </Text>
-            )}
-          </View>
+          <Text style={[
+            styles.discountText,
+            !item.applicable && styles.discountTextDisabled
+          ]}>
+            {item.discountType === 'percent' 
+              ? `Giảm ${item.discountValue}%` 
+              : `Giảm ${item.discountValue.toLocaleString()}đ`
+            }
+          </Text>
 
           {!item.applicable && !isApplied && (
-            <View style={styles.notApplicableBadge}>
-              <Text style={styles.notApplicableText}>Không áp dụng</Text>
-            </View>
+            <Text style={styles.notApplicableText}>Chưa đủ điều kiện</Text>
           )}
         </View>
       </TouchableOpacity>
     );
   };
 
-  // Sửa lại renderPromotionContent để hiển thị promotions từ API
+  // Sửa lại renderPromotionContent để compact hơn
   const renderPromotionContent = () => (
     <View style={styles.promotionSection}>
       <View style={styles.promotionSectionHeader}>
-        <Text style={styles.promotionSectionTitle}>Khuyến mãi có sẵn</Text>
-        <Text style={styles.promotionSectionSubtitle}>
-          {availablePromotions.filter(p => p.applicable).length} khuyến mãi có thể áp dụng
+        <Text style={styles.promotionSectionTitle}>
+          Khuyến mãi ({availablePromotions.filter(p => p.applicable).length})
         </Text>
       </View>
       
       {promotionLoading ? (
         <View style={styles.promotionLoadingContainer}>
           <ActivityIndicator size="small" color="#2196F3" />
-          <Text style={styles.promotionLoadingText}>Đang tải khuyến mãi...</Text>
+          <Text style={styles.promotionLoadingText}>Đang tải...</Text>
         </View>
       ) : availablePromotions.length > 0 ? (
         <FlatList
@@ -626,12 +603,11 @@ export default function OrderDetail({ navigation, route }) {
           horizontal
           showsHorizontalScrollIndicator={false}
           contentContainerStyle={styles.promotionList}
-          ItemSeparatorComponent={() => <View style={{ width: 12 }} />}
+          ItemSeparatorComponent={() => <View style={{ width: 8 }} />}
         />
       ) : (
         <View style={styles.noPromotionContainer}>
-          <Ionicons name="gift-outline" size={48} color="#d1d5db" />
-          <Text style={styles.noPromotionText}>Không có khuyến mãi nào</Text>
+          <Text style={styles.noPromotionText}>Không có khuyến mãi</Text>
         </View>
       )}
     </View>
@@ -774,54 +750,201 @@ export default function OrderDetail({ navigation, route }) {
     }
   }, [sessionId, tableName, navigation]);
 
-  // Function handleCheckoutPayment - SỬ DỤNG API CHECKOUT VÀ CHUYỂN TỚI PAYMENT SCREEN
+  // Function handleCheckoutPayment - SỬA LẠI VỚI DEBUG CHI TIẾT HỚN
   const handleCheckoutPayment = useCallback(async () => {
     try {
-      console.log('💳 Creating bill via checkout API...');
+      console.log('💳 [OrderDetail] ===== YÊU CẦU THANH TOÁN =====');
 
       if (!sessionId) {
         showToast('❌ Không tìm thấy thông tin phiên chơi', 'error');
         return;
       }
 
-      // Hiển thị loading
       setSaving(true);
 
-      // Gọi API checkout để tạo bill và đóng session
-      const checkoutResponse = await sessionService.checkout(sessionId, {
+      // ✅ THÊM: Debug chi tiết về state promotion
+      console.log('🎯 [OrderDetail] ===== PROMOTION STATE DEBUG =====');
+      console.log('🎯 [OrderDetail] appliedPromotions:', appliedPromotions);
+      console.log('🎯 [OrderDetail] appliedPromotions type:', typeof appliedPromotions);
+      console.log('🎯 [OrderDetail] appliedPromotions length:', appliedPromotions?.length);
+      console.log('🎯 [OrderDetail] appliedPromotions JSON:', JSON.stringify(appliedPromotions, null, 2));
+      
+      // ✅ THÊM: Debug functions tính toán
+      const originalTotal = getTotalAmount();
+      const totalWithPromotions = getTotalAmountWithPromotions();
+      const discountAmount = getTotalDiscount();
+      
+      console.log('🎯 [OrderDetail] ===== CALCULATION DEBUG =====');
+      console.log('🎯 [OrderDetail] Original total:', originalTotal);
+      console.log('🎯 [OrderDetail] Total with promotions:', totalWithPromotions);
+      console.log('🎯 [OrderDetail] Discount amount:', discountAmount);
+      console.log('🎯 [OrderDetail] Session ID:', sessionId);
+
+      // ✅ SỬA: Kiểm tra promotion bằng cách check cả discount amount
+      const hasPromotions = appliedPromotions && appliedPromotions.length > 0;
+      const hasDiscount = discountAmount > 0;
+      
+      console.log('🎯 [OrderDetail] Has promotions (state):', hasPromotions);
+      console.log('🎯 [OrderDetail] Has discount (calculated):', hasDiscount);
+      
+      // Nếu có discount nhưng không có promotions trong state -> có lỗi về state
+      if (hasDiscount && !hasPromotions) {
+        console.warn('⚠️ [OrderDetail] INCONSISTENCY: Có discount nhưng không có promotions trong state!');
+        console.warn('⚠️ [OrderDetail] This indicates a state synchronization issue');
+        
+        // Thử lấy lại thông tin promotions từ UI state
+        showToast('⚠️ Có lỗi đồng bộ dữ liệu khuyến mãi. Đang thử tạo bill với số tiền hiện tại...', 'warning');
+      }
+      
+      // ✅ SỬA: Nếu KHÔNG có discount thực tế thì tạo bill thông thường
+      if (!hasDiscount) {
+        console.log('⚠️ [OrderDetail] No actual discount, creating bill with original amount');
+        
+        const checkoutPayload = {
+          endAt: new Date(),
+          discountLines: [],
+          surcharge: 0,
+          paymentMethod: 'cash',
+          paid: false,
+          note: 'Yêu cầu thanh toán từ menu - không có khuyến mãi'
+        };
+
+        console.log('📤 [OrderDetail] Simple payload (no promotions):', JSON.stringify(checkoutPayload, null, 2));
+
+        const checkoutResponse = await sessionService.checkout(sessionId, checkoutPayload);
+        
+        const createdBill = checkoutResponse.data?.bill || checkoutResponse.data || checkoutResponse;
+        const billTotal = createdBill.total;
+
+        console.log('💰 [OrderDetail] Created bill total:', billTotal);
+        console.log('💰 [OrderDetail] Expected total (original):', originalTotal);
+
+        showToast('✅ Tạo hóa đơn thành công');
+        navigation.navigate('Main', {
+          screen: 'Payment',
+          params: { refreshData: true }
+        });
+        return;
+      }
+
+      // ✅ CÓ DISCOUNT - Tạo bill với promotion dựa trên calculation thay vì state
+      console.log('🎁 [OrderDetail] ===== HAS DISCOUNT - CREATING DISCOUNTED BILL =====');
+      
+      // Nếu có promotions trong state, dùng nó
+      let discountLines = [];
+      
+      if (hasPromotions) {
+        console.log('🎁 [OrderDetail] Using promotions from state');
+        appliedPromotions.forEach(promotion => {
+          console.log('🎁 [OrderDetail] Processing promotion:', {
+            name: promotion.name,
+            code: promotion.code,
+            discountType: promotion.discountType,
+            discountValue: promotion.discountValue
+          });
+
+          const discountLine = {
+            name: `${promotion.name} (${promotion.code})`,
+            type: promotion.discountType === 'percent' ? 'percent' : 'value',
+            value: promotion.discountValue,
+            amount: promotion.discountType === 'percent' 
+              ? Math.min((originalTotal * promotion.discountValue) / 100, promotion.maxAmount || Infinity)
+              : promotion.discountValue,
+            meta: {
+              promotionId: promotion.id,
+              code: promotion.code,
+              applyTo: promotion.applyTo,
+              maxAmount: promotion.maxAmount,
+              stackable: promotion.stackable
+            }
+          };
+          
+          console.log('🎁 [OrderDetail - DiscountLine]:', JSON.stringify(discountLine, null, 2));
+          discountLines.push(discountLine);
+        });
+      } else {
+        // Fallback: Tạo discount line generic dựa trên discount amount
+        console.log('🎁 [OrderDetail] No promotions in state, creating generic discount line');
+        discountLines = [{
+          name: 'Khuyến mãi đã áp dụng',
+          type: 'value',
+          value: discountAmount,
+          amount: discountAmount,
+          meta: {
+            source: 'calculated',
+            note: 'Recovered from UI calculation'
+          }
+        }];
+      }
+
+      const checkoutPayload = {
         endAt: new Date(),
-        paymentMethod: 'cash', // Mặc định tiền mặt
-        paid: false, // Chưa thanh toán, chỉ tạo bill
-        note: 'Yêu cầu thanh toán từ menu'
-      });
+        discountLines: discountLines,
+        surcharge: 0,
+        paymentMethod: 'cash',
+        paid: false,
+        note: hasPromotions 
+          ? `Yêu cầu thanh toán - Áp dụng KM: ${appliedPromotions.map(p => p.code).join(', ')}`
+          : `Yêu cầu thanh toán - Giảm giá: ${discountAmount.toLocaleString()}đ`
+      };
 
-      console.log('✅ Bill created via checkout:', checkoutResponse);
+      console.log('📤 [OrderDetail] Checkout payload with discounts:', JSON.stringify(checkoutPayload, null, 2));
 
-      showToast('✅ Tạo hóa đơn thành công');
+      const checkoutResponse = await sessionService.checkout(sessionId, checkoutPayload);
+      
+      console.log('📥 [OrderDetail] Checkout response:', JSON.stringify(checkoutResponse, null, 2));
 
-      // Chuyển tới Main tab với Payment screen
+      const createdBill = checkoutResponse.data?.bill || checkoutResponse.data || checkoutResponse;
+      const billId = createdBill._id || createdBill.id;
+      const billTotal = createdBill.total;
+      const billDiscounts = createdBill.discounts || [];
+
+      console.log('💰 [OrderDetail] Created bill ID:', billId);
+      console.log('💰 [OrderDetail] Created bill total:', billTotal);
+      console.log('💰 [OrderDetail] Bill discounts:', billDiscounts);
+      console.log('💰 [OrderDetail] Expected total:', totalWithPromotions);
+
+      // Validation kết quả
+      if (billDiscounts.length > 0) {
+        console.log('✅ [OrderDetail] Backend applied discounts successfully!');
+        showToast(`✅ Áp dụng khuyến mãi thành công - Tiết kiệm ${discountAmount.toLocaleString()}đ`);
+      } else {
+        console.warn('⚠️ [OrderDetail] Expected discounts but none found in bill');
+        showToast('⚠️ Có vấn đề với khuyến mãi, kiểm tra backend logs');
+      }
+
+      if (Math.abs(billTotal - totalWithPromotions) < 1000) {
+        console.log('✅ [OrderDetail] Total matches expected amount!');
+        showToast('✅ Tạo hóa đơn thành công với khuyến mãi đã áp dụng');
+      } else {
+        console.warn('⚠️ [OrderDetail] Total mismatch');
+        console.warn('⚠️ [OrderDetail] Backend:', billTotal, '- Expected:', totalWithPromotions);
+        showToast(`⚠️ Bill: ${billTotal.toLocaleString()}đ, Mong đợi: ${totalWithPromotions.toLocaleString()}đ`);
+      }
+
       navigation.navigate('Main', {
         screen: 'Payment',
         params: { refreshData: true }
       });
 
     } catch (error) {
-      console.error('❌ Error creating bill via checkout:', error);
-
-      let errorMessage = 'Không thể tạo hóa đơn';
+      console.error('❌ [OrderDetail] Error creating bill:', error);
+      console.error('❌ [OrderDetail] Error response:', error.response?.data);
+      
+      let errorMessage = 'Có lỗi xảy ra khi tạo hóa đơn';
       if (error.response?.status === 400) {
-        errorMessage = 'Phiên chơi không hợp lệ';
+        errorMessage = 'Thông tin không hợp lệ';
       } else if (error.response?.status === 404) {
         errorMessage = 'Không tìm thấy phiên chơi';
       } else if (error.response?.data?.message) {
         errorMessage = error.response.data.message;
       }
-
+      
       showToast(`❌ ${errorMessage}`, 'error');
     } finally {
       setSaving(false);
     }
-  }, [sessionId, navigation]);
+  }, [sessionId, getTotalAmountWithPromotions, getTotalAmount, getTotalDiscount, appliedPromotions, showToast, navigation]);
 
   // Hàm tăng số lượng sản phẩm
   const handleIncreaseQuantity = useCallback(async (item) => {
@@ -2077,6 +2200,7 @@ const styles = StyleSheet.create({
     padding: 12,
     alignItems: 'center',
     borderBottomWidth: 2,
+   
     borderBottomColor: 'transparent',
   },
   activeTab: { 
@@ -2086,25 +2210,19 @@ const styles = StyleSheet.create({
   // Thêm styles cho promotion section
   promotionSection: {
     backgroundColor: '#fff',
-    paddingVertical: 16,
-    minHeight: 160,
+    paddingVertical: 12, // Giảm từ 16
+    minHeight: 100, // Giảm từ 160
   },
 
   promotionSectionHeader: {
     paddingHorizontal: 16,
-    marginBottom: 12,
+    marginBottom: 8, // Giảm từ 12
   },
 
   promotionSectionTitle: {
-    fontSize: 16,
+    fontSize: 14, // Giảm từ 16
     fontWeight: '600',
     color: '#111827',
-    marginBottom: 4,
-  },
-
-  promotionSectionSubtitle: {
-    fontSize: 14,
-    color: '#6b7280',
   },
 
   promotionList: {
@@ -2113,19 +2231,19 @@ const styles = StyleSheet.create({
 
   promotionCard: {
     backgroundColor: '#fff',
-    borderRadius: 12,
-    padding: 16,
-    width: 280,
-    borderWidth: 2,
+    borderRadius: 8, // Giảm từ 12
+    padding: 10, // Giảm từ 16
+    width: 160, // Giảm từ 280
+    borderWidth: 1, // Giảm từ 2
     borderColor: '#e5e7eb',
     shadowColor: '#000',
     shadowOffset: {
       width: 0,
-      height: 2,
+      height: 1, // Giảm từ 2
     },
-    shadowOpacity: 0.1,
-    shadowRadius: 3,
-    elevation: 3,
+    shadowOpacity: 0.05, // Giảm từ 0.1
+    shadowRadius: 2, // Giảm từ 3
+    elevation: 2, // Giảm từ 3
   },
 
   promotionCardApplied: {
@@ -2141,26 +2259,24 @@ const styles = StyleSheet.create({
   promotionHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    marginBottom: 8,
-  },
-
-  promotionCodeContainer: {
-    backgroundColor: '#eff6ff',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 6,
+    alignItems: 'center',
+    marginBottom: 6, // Giảm từ 8
   },
 
   promotionCode: {
-    fontSize: 12,
+    fontSize: 11, // Giảm từ 12
     fontWeight: '600',
     color: '#2563eb',
-    letterSpacing: 0.5,
+    backgroundColor: '#eff6ff',
+    paddingHorizontal: 6, // Giảm từ 8
+    paddingVertical: 2, // Giảm từ 4
+    borderRadius: 4, // Giảm từ 6
+    letterSpacing: 0.3,
   },
 
   promotionCodeApplied: {
     color: '#16a34a',
+    backgroundColor: '#f0fdf4',
   },
 
   appliedBadge: {
@@ -2176,8 +2292,8 @@ const styles = StyleSheet.create({
   },
 
   promotionName: {
-    fontSize: 16,
-    fontWeight: '600',
+    fontSize: 13, // Giảm từ 16
+    fontWeight: '500', // Giảm từ 600
     color: '#111827',
     marginBottom: 6,
   },
@@ -2186,29 +2302,14 @@ const styles = StyleSheet.create({
     color: '#9ca3af',
   },
 
-  promotionDescription: {
-    fontSize: 14,
-    color: '#6b7280',
-    lineHeight: 20,
-    marginBottom: 12,
-  },
-
-  promotionDescriptionDisabled: {
-    color: '#d1d5db',
-  },
-
   promotionFooter: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'flex-end',
-  },
-
-  discountInfo: {
-    flex: 1,
+    alignItems: 'center',
   },
 
   discountText: {
-    fontSize: 15,
+    fontSize: 14, // Giảm từ 15
     fontWeight: '700',
     color: '#dc2626',
   },
@@ -2217,21 +2318,8 @@ const styles = StyleSheet.create({
     color: '#9ca3af',
   },
 
-  maxAmountText: {
-    fontSize: 12,
-    color: '#6b7280',
-    marginTop: 2,
-  },
-
-  notApplicableBadge: {
-    backgroundColor: '#fee2e2',
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 4,
-  },
-
   notApplicableText: {
-    fontSize: 11,
+    fontSize: 10, // Giảm từ 11
     fontWeight: '500',
     color: '#dc2626',
   },
@@ -2239,13 +2327,12 @@ const styles = StyleSheet.create({
   noPromotionContainer: {
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 32,
+    paddingVertical: 20, // Giảm từ 32
   },
 
   noPromotionText: {
-    fontSize: 16,
+    fontSize: 14, // Giảm từ 16
     color: '#9ca3af',
-    marginTop: 8,
   },
 
   // Thêm styles cho promotion loading
@@ -2253,12 +2340,12 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 32,
+    paddingVertical: 20, // Giảm từ 32
   },
 
   promotionLoadingText: {
-    marginLeft: 8,
-    fontSize: 14,
+    marginLeft: 6, // Giảm từ 8
+    fontSize: 13, // Giảm từ 14
     color: '#6b7280',
   },
 });

@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from "react";
 import {
   View,
@@ -273,7 +272,7 @@ export default function HomeScreen({ navigation }) {
 
       <TouchableOpacity
         style={styles.addButton}
-        onPress={() => navigation.navigate("OrderScreen")}
+        onPress={() => navigation.navigate("ChooseTableScreen")}
       >
         <Ionicons name="add" size={28} color="#fff" />
       </TouchableOpacity>
