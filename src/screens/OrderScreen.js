@@ -11,6 +11,7 @@ import {
   ToastAndroid, // Thêm import
   Platform, // Thêm import
 } from 'react-native';
+import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { getMenuCategories, getMenuItems } from '../services/productService';
 import { sessionService } from '../services/sessionService';
@@ -58,8 +59,13 @@ function getCategoryIcon(category, isActive) {
     return <Ionicons name="game-controller-outline" size={size} color={color} />;
   }
 
-  return <Ionicons name="grid-outline" size={size} color={color} />;
-}
+return (
+  <MaterialCommunityIcons
+    name="billiards"
+    size={size}
+    color={color}
+  />
+);}
 
 // Thêm hàm showToast giống OrderDetail
 const showToast = (message, type = 'success') => {
