@@ -944,7 +944,7 @@ export default function OrderDetail({ navigation, route }) {
     } finally {
       setSaving(false);
     }
-  }, [sessionId, getTotalAmountWithPromotions, getTotalAmount, getTotalDiscount, appliedPromotions, showToast, navigation]);
+  }, [sessionId, getTotalAmountWithPromotions, getTotalAmount, getTotalDiscount, appliedPromotions, navigation]);
 
   // Hàm tăng số lượng sản phẩm
   const handleIncreaseQuantity = useCallback(async (item) => {
@@ -1643,6 +1643,7 @@ export default function OrderDetail({ navigation, route }) {
           </View>
         </TouchableOpacity>
       )}
+      
 
       {/* Dialog hủy đơn */}
       <CancelOrderDialog />
@@ -2200,7 +2201,6 @@ const styles = StyleSheet.create({
     padding: 12,
     alignItems: 'center',
     borderBottomWidth: 2,
-   
     borderBottomColor: 'transparent',
   },
   activeTab: { 
